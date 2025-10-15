@@ -24,7 +24,7 @@ services:
   eliza-app:
     build:
       context: ../py-app
-      dockerfile: Dockerfile
+      dockerfile: ../docker-app/Dockerfile
     container_name: eliza-app
     ports:
       - "8000:8000"

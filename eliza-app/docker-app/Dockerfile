@@ -34,7 +34,8 @@ SHELL ["/bin/bash", "-c"]
 WORKDIR /app
 COPY . ./
 
-RUN pip install -r requirements.txt
+RUN python -m venv venv
+RUN source /app/venv/bin/activate && pip install -r requirements.txt
 
 
 # To build a specfic stage only use the --target option, e.g.:
@@ -45,5 +46,5 @@ COPY --from=build /app /app/
 
 ENV PYTHONPATH="/app/src:${PYTHONPATH}"
 
-WORKDIR /app/py-app
+WORKDIR /app
 CMD ["/bin/bash", "-c", "source /app/venv/bin/activate && python app.py"]
