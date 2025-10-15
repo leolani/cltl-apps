@@ -43,14 +43,7 @@ Before installing, ensure you have the required [prerequisites](#prerequisites).
 
 #### Option 1: Local Python Application (Recommended for Development)
 
-1. **Clone the Repository**
-
-```bash
-git clone https://github.com/leolani/eliza-app.git
-cd eliza-app
-```
-
-2. **Set Up Python Environment**
+1. **Set Up Python Environment**
 
 ```bash
 cd py-app
@@ -64,7 +57,7 @@ source venv/bin/activate  # On macOS/Linux
 venv\Scripts\activate  # On Windows
 ```
 
-3. **Install Dependencies**
+2. **Install Dependencies**
 
 ```bash
 pip install --upgrade pip
@@ -77,14 +70,7 @@ This will install all CLTL components directly from their GitHub repositories at
 
 #### Option 2: Docker Compose (Recommended for Production)
 
-1. **Clone the Repository**
-
-```bash
-git clone https://github.com/leolani/eliza-app.git
-cd eliza-app
-```
-
-2. **Build and Run with Docker Compose**
+**Build and Run with Docker Compose**
 
 ```bash
 cd docker-app
