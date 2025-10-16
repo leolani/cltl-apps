@@ -5,7 +5,7 @@ cltl.backend[host,service,impl] @ git+https://github.com/leolani/cltl-backend@e6
 cltl.vad @ git+https://github.com/leolani/cltl-vad@c340a239facc0c22c0b82b4cefec0e4db5f61582
 cltl.asr[impl,service,whisper] @ git+https://github.com/leolani/cltl-asr@99df4e7ae0bc72f78365254f1a058800a53d1007
 cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@6ff0310a1d80f48b6c819567eef60221c0dfd2f5
-cltl.chat-ui[service] @ git+https://github.com/leolani/cltl-chat-ui@705beeb8911c82c0d562d9b93e6d0d47eb008157
+cltl.chat-ui[service] @ git+https://github.com/leolani/cltl-chat-ui@4a549da426d976363f9ab26a6161a7f215c11b99
 cltl.eliza[service] @ git+https://github.com/leolani/cltl-eliza@45a3dcdcc81a32f8b5b599f5ac420c3b89d9abdb
 
 # Voice Recognition/Generation
