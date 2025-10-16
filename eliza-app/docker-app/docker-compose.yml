@@ -29,7 +29,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ../py-app/config:/app/config
+      - ./config:/app/config
       - ../py-app/storage:/app/storage
     environment:
       - CLTL_LOGGING_CONFIG=/app/config/logging.config
@@ -38,6 +38,10 @@ services:
         condition: service_healthy
     networks:
       - eliza-network
+    extra_hosts:
+      # On Linux, map the special name to the host gateway.
+      # On Mac/Windows it's already defined; this line is harmless there.
+      - "host.docker.internal:host-gateway"
 
 volumes:
   rabbitmq_data:
