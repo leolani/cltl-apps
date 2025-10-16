@@ -8,6 +8,7 @@ A conversational AI application built using the CLTL (Computational Lexicology &
 - [Getting Started](#getting-started)
   - [Installation](#installation)
   - [Running the Application](#running-the-application)
+- [Advanced Setup](#advanced-setup)
 - [Application Architecture](#application-architecture)
   - [Core Components](#core-components)
   - [Event System](#event-system)
@@ -178,6 +179,69 @@ The Docker container connects to the host backend via `host.docker.internal:8000
 docker-compose down              # Stop services
 docker-compose logs -f           # View logs
 docker-compose ps                # Check status
+```
+
+## Advanced Setup
+
+### Running Local Python App with External RabbitMQ
+
+For development and debugging, you may want to run the Python application locally while using RabbitMQ for distributed messaging. This gives you the benefits of the Kombu event bus (message persistence, monitoring) while allowing easy debugging of the application code.
+
+**Step 1: Start RabbitMQ standalone**
+
+```bash
+docker run -d --name rabbitmq \
+  -p 5672:5672 -p 15672:15672 \
+  -e RABBITMQ_DEFAULT_USER=eliza \
+  -e RABBITMQ_DEFAULT_PASS=eliza123 \
+  rabbitmq:3.12-management
+```
+
+**Step 2: Configure the application to use localhost RabbitMQ**
+
+Edit `py-app/config/default.config` and update the Kombu server setting:
+
+```ini
+[cltl.event.kombu]
+server: amqp://eliza:eliza123@localhost:5672/
+exchange: cltl.combot
+type: direct
+compression: bzip2
+```
+
+Also ensure the event implementation is set to use Kombu:
+
+```ini
+[cltl.event]
+implementation: kombu
+```
+
+**Step 3: Run the application**
+
+```bash
+cd py-app
+source venv/bin/activate     # macOS/Linux
+# OR
+venv\Scripts\activate        # Windows
+
+python app.py
+```
+
+**Access points:**
+- **Application**: [http://localhost:8000/chatui/static/chat.html](http://localhost:8000/chatui/static/chat.html)
+- **RabbitMQ Management UI**: [http://localhost:15672](http://localhost:15672) (Username: `eliza`, Password: `eliza123`)
+
+**Benefits of this setup:**
+- Local debugging with breakpoints while using distributed messaging
+- Monitor message flow via RabbitMQ Management UI
+- Test Kombu integration without full Docker setup
+- Component isolation with message persistence
+
+**To stop RabbitMQ:**
+
+```bash
+docker stop rabbitmq
+docker rm rabbitmq
 ```
 
 ## Application Architecture
