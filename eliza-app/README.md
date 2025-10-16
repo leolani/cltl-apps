@@ -113,26 +113,73 @@ Press `Ctrl+C` to stop the application.
 
 #### Docker Compose Application
 
-This mode uses **RabbitMQ with the Kombu event bus** for distributed component communication, which is ideal for production deployments.
+This mode uses **RabbitMQ with the Kombu event bus** for distributed component communication, ideal for production deployments.
+
+The Docker setup supports two modes: **with voice input** (requires backend on host) or **text-only** (fully containerized).
+
+##### Starting the Application
 
 ```bash
 cd docker-app
 docker-compose up
 ```
 
-Access the same endpoints as above, plus:
-- **RabbitMQ Management UI**: [http://localhost:15672](http://localhost:15672)
-  - Username: `eliza`
-  - Password: `eliza123`
+Use `docker-compose up --build` to rebuild the image after code or configuration changes.
 
-To stop the application:
+**Access points:**
+- **Chat UI**: [http://localhost:8000/chatui/static/chat.html](http://localhost:8000/chatui/static/chat.html)
+- **RabbitMQ Management UI**: [http://localhost:15672](http://localhost:15672) (Username: `eliza`, Password: `eliza123`)
+- **Storage API**: [http://localhost:8000/storage](http://localhost:8000/storage)
+- **EMISSOR Data API**: [http://localhost:8000/emissor](http://localhost:8000/emissor)
+
+##### Mode 1: With Voice Input (Default)
+
+The default configuration enables voice interaction but requires a **backend server running on your host machine** to provide microphone access.
+
+**Run the backend server on your host:**
+
 ```bash
-docker-compose down
+# Create and activate a virtual environment
+python -m venv backend-venv
+source backend-venv/bin/activate     # macOS/Linux; use backend-venv\Scripts\activate on Windows
+
+# Install the backend
+pip install cltl.backend[host]
+
+# Start the backend server (matches docker config: 16kHz, mono)
+leoserv --rate 16000 --channels 1 --port 8000
 ```
 
-To rebuild after changes:
+**Key `leoserv` arguments:**
+- `--rate`: Sampling rate (16000, 32000, or 44100 Hz) - must match `docker-app/config/custom.config`
+- `--channels`: Audio channels (1=mono, 2=stereo) - use 1 for Eliza
+- `--port`: Server port (default: 8000)
+
+The Docker container connects to the host backend via `host.docker.internal:8000` (configured in docker-compose.yml).
+
+##### Mode 2: Text-Only (No Voice)
+
+For deployment without a microphone (e.g., remote servers), disable voice components in `docker-app/config/custom.config`:
+
+```ini
+[cltl.backend.mic]
+topic:
+
+[cltl.vad]
+implementation:
+
+[cltl.asr]
+implementation:
+```
+
+Then run `docker-compose up` - the application will work with text input only via the Chat UI.
+
+##### Management Commands
+
 ```bash
-docker-compose up --build
+docker-compose down              # Stop services
+docker-compose logs -f           # View logs
+docker-compose ps                # Check status
 ```
 
 ## Application Architecture
