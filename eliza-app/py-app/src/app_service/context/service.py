@@ -21,7 +21,7 @@ SPEAKER = Agent("Human", "http://cltl.nl/leolani/world/human_speaker")
 class ContextService:
     @classmethod
     def from_config(cls, event_bus: EventBus, resource_manager: ResourceManager, config_manager: ConfigurationManager):
-        config = config_manager.get_config("eliza.context")
+        config = config_manager.get_config("app.context")
         scenario_topic = config.get("topic_scenario")
         intention_topic = config.get("topic_intention")
         desire_topic = config.get("topic_desire")
