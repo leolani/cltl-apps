@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   rabbitmq:
     image: "rabbitmq:3.12-management"
@@ -21,6 +19,46 @@ services:
     networks:
       - cltl-llm-network
 
+  ollama: &ollama
+    build:
+      context: .
+      dockerfile: ollama.Dockerfile
+    profiles: ["server"]
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: [ "CMD", "curl", "ollama:11434" ]
+      interval: 10s
+      timeout: 10s
+      retries: 600
+    networks:
+      - cltl-llm-network
+#
+#  ollama-gpu:
+#    <<: *ollama
+#    profiles: ["server-gpu"]
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu]
+
+  pull-model:
+    build:
+      context: .
+      dockerfile: ./pull_model.Dockerfile
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - LLM=${LLM-smollm:135m}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - cltl-llm-network
+    tty: true
+
   cltl-llm-app:
     build:
       context: ../py-app
@@ -36,6 +74,8 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      pull-model:
+        condition: service_completed_successfully
     networks:
       - cltl-llm-network
     extra_hosts:

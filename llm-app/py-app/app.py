@@ -358,26 +358,20 @@ class LLMContainer(EmissorStorageContainer, InfraContainer):
     @property
     @singleton
     def llm(self) -> LLM:
-
-
         config = self.config_manager.get_config("cltl.llm")
 
         model = config.get("model") if "model" in config else None
-        instruction_content = config.get("instruction") if "instruction" in config else None
-        instruction ={"role": "system", "content": instruction_content}
-        temperature = config.get("temperature") if "temperature" in config else None
-        port = config.get("port") if "port" in config else None
-        max_history = config.get("max_history") if "max_history" in config else None
-        intro = config.get("intro") if "intro" in config else None
-        stop = config.get("stop") if "stop" in config else None
-        server = False
-        if "server" in config:
-            server = True
-        if not model:
-            logger.info("No model specified in de config", config)
-            return None
-        else:
-            return LLMImpl(model_name=model, instruction=instruction,  intro = intro, stop = stop,  temperature=float(temperature), max_history=int(max_history), server=server, port =port)
+        url = config.get("url")
+        instruction ={"role": "system", "content": config.get("instruction")}
+        temperature = config.get("temperature")
+        max_history = config.get("max_history")
+        intro = config.get("intro")
+        stop = config.get("stop")
+        server = config.get_boolean("server") if "server" in config else False
+
+        return LLMImpl(model_name=model, instruction=instruction,  intro = intro, stop = stop,
+                       temperature=float(temperature), max_history=int(max_history),
+                       server=server, url=url)
 
 
     @property
