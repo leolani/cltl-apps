@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: ollama.Dockerfile
-    profiles: ["server"]
+#    profiles: ["server"]
     ports:
       - "11434:11434"
     healthcheck:
@@ -50,14 +50,13 @@ services:
       context: .
       dockerfile: ./pull_model.Dockerfile
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - LLM=${LLM-smollm:135m}
+      - OLLAMA_HOST=http://ollama:11434
+      - LLM=llama3.2
     depends_on:
       ollama:
         condition: service_healthy
     networks:
       - cltl-llm-network
-    tty: true
 
   cltl-llm-app:
     build:
