@@ -23,7 +23,6 @@ services:
     build:
       context: .
       dockerfile: ollama.Dockerfile
-#    profiles: ["server"]
     ports:
       - "11434:11434"
     healthcheck:
@@ -33,19 +32,19 @@ services:
       retries: 600
     networks:
       - cltl-llm-network
-#
-#  ollama-gpu:
-#    <<: *ollama
-#    profiles: ["server-gpu"]
-#    deploy:
-#      resources:
-#        reservations:
-#          devices:
-#            - driver: nvidia
-#              count: all
-#              capabilities: [gpu]
 
-  pull-model:
+  ollama-gpu:
+    <<: *ollama
+    profiles: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  pull-model: &pull
     build:
       context: .
       dockerfile: ./pull_model.Dockerfile
@@ -58,10 +57,17 @@ services:
     networks:
       - cltl-llm-network
 
+  pull-model-gpu:
+    <<: *pull
+    profiles: ["gpu"]
+    depends_on:
+      ollama-gpu:
+        condition: service_healthy
+
   cltl-llm-app:
     build:
       context: ../py-app
-      dockerfile: ../docker-app/Dockerfile
+      dockerfile: ../docker-app/app.Dockerfile
     container_name: cltl-llm-app
     ports:
       - "8000:8000"
