@@ -28,7 +28,7 @@ services:
     volumes:
       - ./storage/ollama:/root/.ollama
     healthcheck:
-      test: [ "CMD", "curl", "ollama:11434" ]
+      test: [ "CMD", "curl", "http://ollama:11434" ]
       interval: 6s
       timeout: 10s
       retries: 10
@@ -52,7 +52,7 @@ services:
       dockerfile: ./pull_model.Dockerfile
     environment:
       - OLLAMA_HOST=http://ollama:11434
-      - LLM=llama3.2
+      - CLTL_LLM=llama3.2
     depends_on:
       ollama:
         condition: service_healthy
@@ -78,6 +78,9 @@ services:
       - ./storage:/app/storage
     environment:
       - CLTL_LOGGING_CONFIG=/app/config/logging.config
+      - CLTL_RABBITMQ_PORT=5672
+      - OLLAMA_HOST=http://ollama:11434
+      - CLTL_LLM=llama3.2
     depends_on:
       rabbitmq:
         condition: service_healthy
