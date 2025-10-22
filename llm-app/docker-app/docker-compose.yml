@@ -10,7 +10,7 @@ services:
       - RABBITMQ_DEFAULT_PASS=cltl123
       - RABBITMQ_DEFAULT_VHOST=/
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - ./storage/rabbitmq:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmqctl", "status"]
       interval: 10s
@@ -25,11 +25,13 @@ services:
       dockerfile: ollama.Dockerfile
     ports:
       - "11434:11434"
+    volumes:
+      - ./storage/ollama:/root/.ollama
     healthcheck:
       test: [ "CMD", "curl", "ollama:11434" ]
-      interval: 10s
+      interval: 6s
       timeout: 10s
-      retries: 600
+      retries: 10
     networks:
       - cltl-llm-network
 
@@ -73,7 +75,7 @@ services:
       - "8000:8000"
     volumes:
       - ./config:/app/config
-      - ../py-app/storage:/app/storage
+      - ./storage:/app/storage
     environment:
       - CLTL_LOGGING_CONFIG=/app/config/logging.config
     depends_on:
@@ -87,9 +89,6 @@ services:
       # On Linux, map the special name to the host gateway.
       # On Mac/Windows it's already defined; this line is harmless there.
       - "host.docker.internal:host-gateway"
-
-volumes:
-  rabbitmq_data:
 
 networks:
   cltl-llm-network:
