@@ -22,9 +22,10 @@ from cltl.backend.spi.text import TextOutput
 from cltl.chatui.api import Chats
 from cltl.chatui.memory import MemoryChats
 from cltl.combot.event.bdi import IntentionEvent, Intention
+from cltl.combot.event.emissor import SIG, MEN
 from cltl.combot.infra.config.k8config import K8LocalConfigurationContainer
 from cltl.combot.infra.di_container import singleton
-from cltl.combot.infra.event import Event
+from cltl.combot.infra.event.api import Event, PAYLOAD
 from cltl.combot.infra.event.kombu import KombuEventBusContainer
 from cltl.combot.infra.event.memory import SynchronousEventBus
 from cltl.combot.infra.event_log import LogWriter
@@ -46,7 +47,7 @@ from cltl_service.emissordata.service import EmissorDataService
 from cltl_service.intentions.init import InitService
 from cltl_service.keyword.service import KeywordService
 from cltl_service.vad.service import VadService
-from emissor.representation.util import serializer as emissor_serializer, object_hook as emissor_object_hook
+from emissor.representation.util import serializer as emissor_serializer, marshal, unmarshal, register_type_var
 from flask import Flask
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from werkzeug.serving import run_simple
@@ -56,7 +57,28 @@ logging.config.fileConfig(os.environ.get('CLTL_LOGGING_CONFIG', default='config/
 logger = logging.getLogger(__name__)
 
 
+# Register TypeVar for usage with emissor serialization utils
+register_type_var(PAYLOAD)
+register_type_var(SIG)
+register_type_var(MEN)
+
+
+def serializer(obj):
+    """Serialize events into deserializable JSON using emissor utilities."""
+    return marshal(obj, cls=Event)
+
+
+def deserializer(obj):
+    """Deserialize events into propert Python objects using emissor utilities."""
+    return unmarshal(obj, cls=Event)
+
+
 class InfraContainer(KombuEventBusContainer, K8LocalConfigurationContainer, ThreadedResourceContainer):
+    @property
+    @singleton
+    def event_bus_serializer(self):
+        return serializer, deserializer
+
     @property
     @singleton
     def event_bus(self):
@@ -283,23 +305,16 @@ class ASRContainer(EmissorStorageContainer, InfraContainer):
         super().stop()
 
 
-class ElizaComponentsContainer(EmissorStorageContainer, InfraContainer):
+class ElizaComponentsContainer(InfraContainer):
     @property
     @singleton
     def keyword_service(self) -> KeywordService:
-        return KeywordService.from_config(self.emissor_data_client,
-                                          self.event_bus, self.resource_manager, self.config_manager)
+        return KeywordService.from_config(self.event_bus, self.resource_manager, self.config_manager)
 
     @property
     @singleton
     def context_service(self) -> ContextService:
         return ContextService.from_config(self.event_bus, self.resource_manager, self.config_manager)
-
-    @property
-    @singleton
-    def keyword_service(self) -> KeywordService:
-        return KeywordService.from_config(self.emissor_data_client,
-                                          self.event_bus, self.resource_manager, self.config_manager)
 
     @property
     @singleton
@@ -311,8 +326,7 @@ class ElizaComponentsContainer(EmissorStorageContainer, InfraContainer):
     @property
     @singleton
     def init_intention(self) -> InitService:
-        return InitService.from_config(self.emissor_data_client,
-                                       self.event_bus, self.resource_manager, self.config_manager)
+        return InitService.from_config(self.event_bus, self.resource_manager, self.config_manager)
 
     def start(self):
         logger.info("Start Eliza services")
@@ -353,7 +367,7 @@ class ChatUIContainer(InfraContainer):
         super().stop()
 
 
-class ElizaContainer(EmissorStorageContainer, InfraContainer):
+class ElizaContainer(InfraContainer):
     @property
     @singleton
     def eliza(self) -> Eliza:
@@ -362,8 +376,7 @@ class ElizaContainer(EmissorStorageContainer, InfraContainer):
     @property
     @singleton
     def eliza_service(self) -> ElizaService:
-        return ElizaService.from_config(self.eliza, self.emissor_data_client,
-                                        self.event_bus, self.resource_manager, self.config_manager)
+        return ElizaService.from_config(self.eliza, self.event_bus, self.resource_manager, self.config_manager)
 
     def start(self):
         logger.info("Start Eliza")
@@ -382,15 +395,11 @@ class ApplicationContainer(ElizaContainer, ElizaComponentsContainer,
                            EmissorStorageContainer, BackendContainer):
     @property
     @singleton
-    def event_bus_serializer(self):
-        return serializer, emissor_object_hook
-
-    @property
-    @singleton
     def log_writer(self):
         config = self.config_manager.get_config("cltl.event_log")
 
-        return LogWriter(config.get("log_dir"), serializer)
+        # Serialize in a plain JSON format
+        return LogWriter(config.get("log_dir"), emissor_serializer)
 
     @property
     @singleton
@@ -413,16 +422,6 @@ class ApplicationContainer(ElizaContainer, ElizaComponentsContainer,
                     self.event_bus.close()
             finally:
                 super().stop()
-
-
-def serializer(obj):
-    try:
-        return emissor_serializer(obj)
-    except Exception:
-        try:
-            return vars(obj)
-        except Exception:
-            return str(obj)
 
 
 def main():

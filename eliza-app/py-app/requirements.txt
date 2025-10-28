@@ -1,12 +1,12 @@
-emissor
-cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@683945eabbda5d320cf15ce25831ad7349416e27
-cltl.context[service] @ git+https://github.com/leolani/cltl-context@bac44b08818c39d0201460f5b814ef8ab1073eb2
-cltl.backend[host,service,impl] @ git+https://github.com/leolani/cltl-backend@e604a929d498c325bd7fcc1944ed64646dbc5907
-cltl.vad @ git+https://github.com/leolani/cltl-vad@c340a239facc0c22c0b82b4cefec0e4db5f61582
-cltl.asr[impl,service,whisper] @ git+https://github.com/leolani/cltl-asr@99df4e7ae0bc72f78365254f1a058800a53d1007
-cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@6ff0310a1d80f48b6c819567eef60221c0dfd2f5
-cltl.chat-ui[service] @ git+https://github.com/leolani/cltl-chat-ui@4c891f844a1d22480d342a16c21e8afc4e446894
-cltl.eliza[service] @ git+https://github.com/leolani/cltl-eliza@45a3dcdcc81a32f8b5b599f5ac420c3b89d9abdb
+emissor @ git+https://github.com/leolani/emissor@38e4dea46b462f06a0bf9297a26541318617836d
+cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@058ab15ed1bb43442948f7bd56f2bd0e5c14dacc
+cltl.context[service] @ git+https://github.com/leolani/cltl-context@ef71b286a3119713a5c0c7a68df3346893609dde
+cltl.backend[host,service,impl] @ git+https://github.com/leolani/cltl-backend@895f961ed318c00142afe7e8fa7e6d0c5a6f8d3a
+cltl.vad @ git+https://github.com/leolani/cltl-vad@9bb366cca27399fd93b74285ca9d3af09cc37dc8
+cltl.asr[impl,service,whisper] @ git+https://github.com/leolani/cltl-asr@5078eee87087fc804275fae4ba8baebfd6061c26
+cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@01e4bcde51d8ffe9577d04458cb9ab4623f337b9
+cltl.chat-ui[service] @ git+https://github.com/leolani/cltl-chat-ui@56b613b13089c163c74949d26a3c916060b15a9a
+cltl.eliza[service] @ git+https://github.com/leolani/cltl-eliza@8e6fc6ea7c63d1c9bc1df7a123912cbc39405d93
 
 # Voice Recognition/Generation
 webrtcvad==2.0.10
