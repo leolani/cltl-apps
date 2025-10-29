@@ -44,6 +44,21 @@ The application serves as a blueprint for building LLM-powered conversational ag
 
 Before installing, ensure you have the required [prerequisites](#prerequisites).
 
+### LLM Configuration
+MacOS and Linux users can use any LLM that's available via Ollama. Check the "tags" section under the model page you
+want to use on https://ollama.ai/library and write the tag for the value of the environment variable `LLM=` in the `.env` file.
+All platforms can use GPT-3.5-turbo and GPT-4 (bring your own API keys for OpenAI models).
+
+**MacOS**
+Install [Ollama](https://ollama.ai) on MacOS and start it before running `docker compose up` using `ollama serve` in a separate terminal.
+Make sure to set the `OLLAMA_BASE_URL=http://host.docker.internal:11434` in the `.env` file when using Ollama docker container.
+
+**Linux**
+No need to install Ollama manually, it will run in a container as
+part of the stack when running with the _server_ profile: run `docker compose up`.
+
+To use the _server-gpu_ profile: run `docker compose --profile server-gpu up`. Also change `OLLAMA_BASE_URL=http://llm-gpu:11434` in the `.env` file.
+
 #### LLM Model Setup
 
 The application requires a compatible LLM model file. You have two options:
