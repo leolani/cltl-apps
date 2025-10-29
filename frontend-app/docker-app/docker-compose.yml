@@ -21,16 +21,17 @@ services:
     networks:
       - cltl-llm-network
 
-  cltl-llm-app:
+  cltl-frontend-app:
+    image: cltl/frontend-app
     build:
       context: ../py-app
       dockerfile: ../docker-app/Dockerfile
-    container_name: cltl-llm-app
+    container_name: cltl-frontend-app
     ports:
       - "8000:8000"
     volumes:
       - ./config:/app/config
-      - ../py-app/storage:/app/storage
+      - ./storage:/app/storage
     environment:
       - CLTL_LOGGING_CONFIG=/app/config/logging.config
     depends_on:

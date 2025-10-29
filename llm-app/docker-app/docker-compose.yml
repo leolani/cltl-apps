@@ -67,6 +67,7 @@ services:
         condition: service_healthy
 
   cltl-llm-app:
+    image: cltl/llm-app
     build:
       context: ../py-app
       dockerfile: ../docker-app/app.Dockerfile

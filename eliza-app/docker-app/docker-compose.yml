@@ -22,6 +22,7 @@ services:
       - eliza-network
 
   eliza-app:
+    image: cltl/eliza-app
     build:
       context: ../py-app
       dockerfile: ../docker-app/Dockerfile
@@ -30,7 +31,7 @@ services:
       - "8000:8000"
     volumes:
       - ./config:/app/config
-      - ../py-app/storage:/app/storage
+      - ./storage:/app/storage
     environment:
       - CLTL_LOGGING_CONFIG=/app/config/logging.config
     depends_on:
