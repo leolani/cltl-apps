@@ -1,10 +1,10 @@
 emissor @ git+https://github.com/leolani/emissor@38e4dea46b462f06a0bf9297a26541318617836d
 cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@058ab15ed1bb43442948f7bd56f2bd0e5c14dacc
-cltl.context[service] @ git+https://github.com/leolani/cltl-context@ef71b286a3119713a5c0c7a68df3346893609dde
+cltl.context[service] @ git+https://github.com/leolani/cltl-context@5a3514ef9250013939ea81737c28df6b5bf027f1
 cltl.backend[host,service,impl] @ git+https://github.com/leolani/cltl-backend@895f961ed318c00142afe7e8fa7e6d0c5a6f8d3a
 cltl.vad @ git+https://github.com/leolani/cltl-vad@9bb366cca27399fd93b74285ca9d3af09cc37dc8
 cltl.asr[impl,service,whisper] @ git+https://github.com/leolani/cltl-asr@5078eee87087fc804275fae4ba8baebfd6061c26
-cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@01e4bcde51d8ffe9577d04458cb9ab4623f337b9
+cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@1b29576740efe601fd1a70e667a6c08a5faf1eb1
 cltl.chat-ui[service] @ git+https://github.com/leolani/cltl-chat-ui@56b613b13089c163c74949d26a3c916060b15a9a
 cltl.llm[service] @ git+https://github.com/leolani/cltl-llm@5f811b1adfb62da2560b17bdff26234843db28f6
 
