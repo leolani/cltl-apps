@@ -1,6 +1,6 @@
 emissor @ git+https://github.com/leolani/emissor@38e4dea46b462f06a0bf9297a26541318617836d
 cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@058ab15ed1bb43442948f7bd56f2bd0e5c14dacc
-cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@1b29576740efe601fd1a70e667a6c08a5faf1eb1
+cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@2a8eacdec494b4b0ab8dca91f121ff8afaa868f2
 cltl.llm[service] @ git+https://github.com/leolani/cltl-llm@5f811b1adfb62da2560b17bdff26234843db28f6
 
 # LLM
