@@ -1,0 +1,65 @@
+emissor @ git+https://github.com/leolani/emissor@38e4dea46b462f06a0bf9297a26541318617836d
+cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@058ab15ed1bb43442948f7bd56f2bd0e5c14dacc
+cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@71c49dc3aaa0a1ecf00580d0be94af72ebd39d48
+cltl.triple_extraction[conversational,service] @ git+https://github.com/leolani/cltl-knowledgeextraction@91982afc7ec7130b5e450b39f6ba899bce994d8eq
+cltl.brain[service] @ git+https://github.com/leolani/cltl-knowledgerepresentation@57290676863fd9d89d2c3fa756ad352500fc73ec
+cltl.reply_generation[llama,service] @ git+https://github.com/leolani/cltl-languagegeneration@c126401af30ee1b538c81602dbb813d24b774cb3
+
+# LLM
+openai==2.3.0
+ollama==0.6.0
+langchain.ollama==0.3.10
+
+# Numerics
+scikit-learn==1.0.2
+scipy==1.8.0
+numpy==1.24.2
+matplotlib==3.7.1
+
+# Utils
+cachetools==4.2.4
+fuzzywuzzy==0.18.0
+pycountry==20.7.3
+reverse-geocoder==1.5.1
+
+# REST/JSON/Messaging support
+Flask==1.1.2
+Werkzeug==2.0.3
+tornado==5.1.1
+jinja2==3.0.3
+connexion==2.7.0
+marshmallow==3.13.0
+marshmallow-dataclass==8.4.1
+marshmallow-enum==1.5.1
+marshmallow-union==0.1.15.post1
+typeguard==2.13.3
+apispec[yaml]==4.0.0
+asyncapi==0.14.0
+PyYAML==5.3.1
+typer==0.9.4
+uvicorn== 0.35.0
+apidaora==0.28.0
+markdown==3.3.3
+kombu==5.0.2
+simplejson==3.17.5
+jsonpickle==2.1.0
+itsdangerous==2.0.1
+
+# Python
+importlib_resources==5.2.2
+mock==4.0.3
+parameterized==0.8.1
+tqdm==4.62.3
+
+# Docker
+python_on_whales==0.78.0
+pydantic==2.11.9
+
+# Others
+jellyfish==0.9.0
+
+# Installation
+wheel==0.40.0
+setuptools-rust==1.7.0
+setuptools_scm==8.0.4
+setuptools==65.1.1
