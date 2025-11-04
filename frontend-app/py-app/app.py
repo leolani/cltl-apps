@@ -1,6 +1,8 @@
 import json
 import logging.config
 import os
+import uuid
+
 import time
 
 from app_service.context.service import ContextService
@@ -49,6 +51,7 @@ from flask import Flask
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
 from werkzeug.serving import run_simple
 
+os.environ["CLTL_TENANT"] = str(uuid.uuid4())
 logging.config.fileConfig(os.environ.get('CLTL_LOGGING_CONFIG', default='config/logging.config'),
                           disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
