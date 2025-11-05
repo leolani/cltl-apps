@@ -3,7 +3,7 @@ version: "3.9"
 services:
   rabbitmq:
     image: "rabbitmq:3.12-management"
-    container_name: cltl-llm-rabbitmq
+    container_name: cltl-client-rabbitmq
     ports:
       - "5672:5672"    # AMQP port
       - "15672:15672"  # Management UI port
@@ -19,14 +19,14 @@ services:
       timeout: 10s
       retries: 6
     networks:
-      - cltl-llm-network
+      - cltl-client-network
 
-  cltl-frontend-app:
-    image: cltl/frontend-app
+  cltl-client-app:
+    image: cltl/client-app
     build:
       context: ../py-app
       dockerfile: ../docker-app/Dockerfile
-    container_name: cltl-frontend-app
+    container_name: cltl-client-app
     ports:
       - "8000:8000"
     volumes:
@@ -38,7 +38,7 @@ services:
       rabbitmq:
         condition: service_healthy
     networks:
-      - cltl-llm-network
+      - cltl-client-network
     extra_hosts:
       # On Linux, map the special name to the host gateway.
       # On Mac/Windows it's already defined; this line is harmless there.
@@ -48,5 +48,5 @@ volumes:
   rabbitmq_data:
 
 networks:
-  cltl-llm-network:
+  cltl-client-network:
     driver: bridge

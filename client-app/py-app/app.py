@@ -419,9 +419,10 @@ def main():
         if started_app.server:
             routes['/host'] = started_app.server.app
 
-        web_app = DispatcherMiddleware(Flask("Frontend app"), routes)
+        web_app = DispatcherMiddleware(Flask("Client app"), routes)
 
-        run_simple('0.0.0.0', 8000, web_app, threaded=True, use_reloader=False, use_debugger=False, use_evalex=True)
+        port = started_app.config_manager.get_config("app.server").get_int("port")
+        run_simple('0.0.0.0', port, web_app, threaded=True, use_reloader=False, use_debugger=False, use_evalex=True)
 
         intention_topic = started_app.config_manager.get_config("cltl.bdi").get("topic_intention")
         termination_event = Event.for_payload(IntentionEvent([Intention("terminate", None)]))
