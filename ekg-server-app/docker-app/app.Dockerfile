@@ -35,6 +35,7 @@ WORKDIR /app
 COPY . ./
 
 RUN python -m venv venv
+RUN source /app/venv/bin/activate && pip install --extra-index-url https://download.pytorch.org/whl/cpu torch==2.9.0+cpu
 RUN source /app/venv/bin/activate && pip install -r requirements.txt
 
 

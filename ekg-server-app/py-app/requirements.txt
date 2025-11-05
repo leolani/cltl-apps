@@ -5,6 +5,7 @@ cltl.triple_extraction[conversational,service] @ git+https://github.com/leolani/
 cltl.brain[service] @ git+https://github.com/leolani/cltl-knowledgerepresentation@07690b3d1e01595a14b2613bc0632d686bfae27e
 cltl.reply_generation[llama,service] @ git+https://github.com/leolani/cltl-languagegeneration@c126401af30ee1b538c81602dbb813d24b774cb3
 
+# Eventually update the torch version in docker-app/app.Dockerfile!
 # LLM
 openai==2.3.0
 ollama==0.6.0
