@@ -30,6 +30,7 @@ services:
     volumes:
       - ./config:/app/config
       - ./storage:/app/storage
+      - ~/nltk_data:/root/nltk_data
     environment:
       - CLTL_LOGGING_CONFIG=/app/config/logging.config
       - CLTL_RABBITMQ_PORT=5672
