@@ -2,6 +2,7 @@ version: "3.9"
 
 services:
   rabbitmq:
+    profiles: [rabbitmq]
     image: "rabbitmq:3.12-management"
     container_name: chat-client-rabbitmq
     ports:
@@ -37,6 +38,7 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+        required: false
     networks:
       - chat-client-network
     extra_hosts:
