@@ -206,9 +206,14 @@ def main():
     application = ApplicationContainer()
 
     with application as started_app:
+        logger.info("Starting the application")
+        time.sleep(1)
+
         intention_topic = started_app.config_manager.get_config("cltl.bdi").get("topic_intention")
         init_event = Event.for_payload(IntentionEvent([Intention("init", None)]))
         started_app.event_bus.publish(intention_topic, init_event)
+
+        logger.info("Started 'init' intention")
 
         routes = {
             '/emissor': started_app.emissor_data_service.app,
