@@ -11,3 +11,4 @@ services:
       - ./storage:/app/storage
     environment:
       - CLTL_LOGGING_CONFIG=/app/config/logging.config
+
