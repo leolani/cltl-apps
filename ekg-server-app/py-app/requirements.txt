@@ -1,5 +1,5 @@
 emissor @ git+https://github.com/leolani/emissor@38e4dea46b462f06a0bf9297a26541318617836d
-cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@058ab15ed1bb43442948f7bd56f2bd0e5c14dacc
+cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@f6bbc721d5e5f9bedfc0ac8618e4b77ab290d206
 cltl.combot[service] @ git+https://github.com/leolani/cltl-combot@2a8eacdec494b4b0ab8dca91f121ff8afaa868f2
 cltl.triple_extraction[conversational,service] @ git+https://github.com/leolani/cltl-knowledgeextraction@e488b55d0132f570f5be119dd8234d09cd1802a2
 cltl.brain[service] @ git+https://github.com/leolani/cltl-knowledgerepresentation@07690b3d1e01595a14b2613bc0632d686bfae27e

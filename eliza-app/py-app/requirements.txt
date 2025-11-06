@@ -1,5 +1,5 @@
 emissor @ git+https://github.com/leolani/emissor@38e4dea46b462f06a0bf9297a26541318617836d
-cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@058ab15ed1bb43442948f7bd56f2bd0e5c14dacc
+cltl.emissor-data[service,client] @ git+https://github.com/leolani/cltl-emissor-data@f6bbc721d5e5f9bedfc0ac8618e4b77ab290d206
 cltl.context[service] @ git+https://github.com/leolani/cltl-context@5a3514ef9250013939ea81737c28df6b5bf027f1
 cltl.backend[host,service,impl] @ git+https://github.com/leolani/cltl-backend@895f961ed318c00142afe7e8fa7e6d0c5a6f8d3a
 cltl.vad @ git+https://github.com/leolani/cltl-vad@9bb366cca27399fd93b74285ca9d3af09cc37dc8
