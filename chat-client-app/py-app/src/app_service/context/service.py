@@ -27,7 +27,8 @@ class ContextService:
 
         speaker_name = config.get("speaker")
         if not speaker_name:
-            logger.error("Please add a speaker name in the custom.config")
+            raise ValueError("Please add a speaker name in the custom.config")
+
 
         speaker = Agent(speaker_name, f"http://cltl.nl/leolani/world/{speaker_name.lower()}")
 
