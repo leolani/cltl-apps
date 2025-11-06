@@ -1,0 +1,13 @@
+version: "3.9"
+
+services:
+  cltl-chat-client-app:
+    image: numblr/chat-client-app:ma-combot
+    container_name: cltl-chat-client-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config
+      - ./storage:/app/storage
+    environment:
+      - CLTL_LOGGING_CONFIG=/app/config/logging.config
