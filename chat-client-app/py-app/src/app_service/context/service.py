@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 AGENT = Agent("Leolani", "http://cltl.nl/leolani/world/leolani")
-SPEAKER = Agent("Human", "http://cltl.nl/leolani/world/human_speaker")
 
 
 class ContextService:
@@ -26,10 +25,16 @@ class ContextService:
         intention_topic = config.get("topic_intention")
         desire_topic = config.get("topic_desire")
 
-        return cls(scenario_topic, intention_topic, desire_topic,
+        speaker_name = config.get("speaker")
+        if not speaker_name:
+            logger.error("Please add a speaker name in the custom.config")
+
+        speaker = Agent(speaker_name, f"http://cltl.nl/leolani/world/{speaker_name.lower()}")
+
+        return cls(speaker, scenario_topic, intention_topic, desire_topic,
                    event_bus, resource_manager)
 
-    def __init__(self, scenario_topic: str, intention_topic: str, desire_topic: str,
+    def __init__(self, speaker: Agent, scenario_topic: str, intention_topic: str, desire_topic: str,
                  event_bus: EventBus, resource_manager: ResourceManager):
         self._event_bus = event_bus
         self._resource_manager = resource_manager
@@ -41,6 +46,7 @@ class ContextService:
         self._topic_worker = None
 
         self.AGENT = AGENT
+        self.speaker = speaker
         self._scenario = None
 
     @property
@@ -89,7 +95,7 @@ class ContextService:
         name_annotation = next(iter(filter(lambda a: a.type == "Entity", mention.annotations)))
 
         speaker_name = name_annotation.value.text
-        self._scenario.context.speaker = Agent(speaker_name, str(f"http://cltl.nl/leolani/friends/{speaker_name}"))
+        self._scenario.context.speaker = Agent(speaker_name, str(f"http://cltl.nl/leolani/friends/{speaker_name.lower()}"))
 
         self._event_bus.publish(self._scenario_topic, Event.for_payload(ScenarioEvent.create(self._scenario)))
         logger.info("Updated scenario %s", self._scenario)
@@ -108,7 +114,7 @@ class ContextService:
         scenario_start = timestamp_now()
         location = self._get_location()
 
-        scenario_context = LeolaniContext(AGENT, SPEAKER, str(uuid.uuid4()), location, [], [])
+        scenario_context = LeolaniContext(AGENT, self.speaker, str(uuid.uuid4()), location, [], [])
         scenario = Scenario.new_instance(str(uuid.uuid4()), scenario_start, None, scenario_context, signals)
 
         capsule = {
