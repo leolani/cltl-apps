@@ -4,6 +4,8 @@ import os
 import pathlib
 import time
 
+from cltl.about.about import AboutImpl
+from cltl.about.api import About
 from cltl.brain.long_term_memory import LongTermMemory
 from cltl.combot.event.emissor import SIG, MEN
 from cltl.combot.infra.config.k8config import K8LocalConfigurationContainer
@@ -18,6 +20,7 @@ from cltl.emissordata.file_storage import EmissorDataFileStorage
 from cltl.reply_generation.thought_selectors.random_selector import RandomSelector
 from cltl.triple_extraction.api import DialogueAct
 from cltl.triple_extraction.chat_analyzer import ChatAnalyzer
+from cltl_service.about.service import AboutService
 from cltl_service.brain.service import BrainService
 from cltl_service.combot.event_log.service import EventLogService
 from cltl_service.emissordata.client import EmissorDataClient
@@ -272,7 +275,33 @@ class ReplierContainer(BrainContainer, EmissorStorageContainer, InfraContainer):
             super().stop()
 
 
-class ApplicationContainer(TripleExtractionContainer, ReplierContainer, BrainContainer, EmissorStorageContainer):
+class AboutAgentContainer(InfraContainer):
+    @property
+    @singleton
+    def about_agent(self) -> About:
+        return AboutImpl()
+
+    @property
+    @singleton
+    def about_agent_service(self) -> AboutService:
+        return AboutService.from_config(self.about_agent, self.event_bus, self.resource_manager, self.config_manager)
+
+    def start(self):
+        logger.info("Start AboutAgent")
+        super().start()
+        self.about_agent_service.start()
+
+    def stop(self):
+        try:
+            logger.info("Stop AboutAgent")
+            self.about_agent_service.stop()
+        finally:
+            super().stop()
+
+
+class ApplicationContainer(AboutAgentContainer,
+                           TripleExtractionContainer, ReplierContainer, BrainContainer,
+                           EmissorStorageContainer):
     @property
     @singleton
     def log_writer(self):
