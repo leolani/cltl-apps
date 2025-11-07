@@ -29,8 +29,7 @@ class ContextService:
         if not speaker_name:
             raise ValueError("Please add a speaker name in the custom.config")
 
-
-        speaker = Agent(speaker_name, f"http://cltl.nl/leolani/world/{speaker_name.lower()}")
+        speaker = Agent(speaker_name, f"http://cltl.nl/leolani/world/{speaker_name.lower().replace(' ', '_')}")
 
         return cls(speaker, scenario_topic, intention_topic, desire_topic,
                    event_bus, resource_manager)
