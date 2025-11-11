@@ -17,6 +17,7 @@ from cltl.combot.infra.event_log import LogWriter
 from cltl.combot.infra.resource.threaded import ThreadedResourceContainer
 from cltl.emissordata.api import EmissorDataStorage
 from cltl.emissordata.file_storage import EmissorDataFileStorage
+from cltl.reply_generation.thought_selectors.nsp_selector import NSP
 from cltl.reply_generation.thought_selectors.random_selector import RandomSelector
 from cltl.triple_extraction.api import DialogueAct
 from cltl.triple_extraction.chat_analyzer import ChatAnalyzer
@@ -227,7 +228,7 @@ class ReplierContainer(BrainContainer, EmissorStorageContainer, InfraContainer):
 
         if "LenkaReplier" in implementations:
             from cltl.reply_generation.lenka_replier import LenkaReplier
-            thought_options = config.get("thought_options", multi=True) if "thought_options" in config else []
+
             llamalize = config.get("llamalize") if "llamalize" in config else False
             model = config.get("model") if "model" in config else None
             server = config.get("server") if "server" in config else None
@@ -237,11 +238,21 @@ class ReplierContainer(BrainContainer, EmissorStorageContainer, InfraContainer):
             temperature = config.get("temperature") if "temperature" in config else None
             max_tokens = config.get("max_tokens") if "max_tokens" in config else None
             show_lenka = config.get("show_lenka") if "show_lenka" in config else False
-            randomness = float(config.get("randomness")) if "randomness" in config else 1.0
+
+            if "selector" in config and config["selector"] == "nsp":
+                selector = NSP(config.get("selector_model"))
+            else:
+                thought_options = config.get("thought_options", multi=True) if "thought_options" in config else []
+                randomness = float(config.get("randomness")) if "randomness" in config else 1.0
+                selector = RandomSelector(randomness=randomness, priority=thought_options)
+
             credentials = self.config_manager.get_config("credentials.ollama")
             key = credentials.get("key")
-            replier = LenkaReplier(model="", instruct=instruct, llamalize=llamalize, temperature=float(temperature), max_tokens=int(max_tokens), show_lenka=show_lenka, thought_selector=RandomSelector(randomness=randomness, priority=thought_options))
-           # replier = LenkaReplier(model_name=model, model_server=server, model_url=url, model_port=port, model_key = key, instruct=instruct, llamalize=llamalize, temperature=float(temperature), max_tokens=int(max_tokens), show_lenka=show_lenka, thought_selector=RandomSelector(randomness=randomness, priority=thought_options))
+
+            replier = LenkaReplier(model_name=model, model_server=server, model_url=url, model_port=port, model_key=key,
+                                   instruct=instruct, llamalize=llamalize, temperature=float(temperature),
+                                   max_tokens=int(max_tokens), show_lenka=show_lenka,
+                                   thought_selector=selector)
             repliers.append(replier)
         if "RLReplier" in implementations:
             from cltl.reply_generation.rl_replier import RLReplier
