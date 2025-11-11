@@ -251,10 +251,10 @@ class ReplierContainer(BrainContainer, EmissorStorageContainer, InfraContainer):
         credentials = self.config_manager.get_config("credentials.ollama")
         key = credentials.get("key")
 
-        replier_factory = lambda: LenkaReplier(model_name=model, model_server=server, model_url=url, model_port=port,
+        replier_factory = lambda: [LenkaReplier(model_name=model, model_server=server, model_url=url, model_port=port,
                                                model_key=key, instruct=instruct, llamalize=llamalize,
                                                temperature=float(temperature), max_tokens=int(max_tokens),
-                                               show_lenka=show_lenka, thought_selector=selector)
+                                               show_lenka=show_lenka, thought_selector=selector)]
 
         ##################
         # repliers = []
