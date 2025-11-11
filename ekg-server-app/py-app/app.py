@@ -224,54 +224,87 @@ class ReplierContainer(BrainContainer, EmissorStorageContainer, InfraContainer):
     def reply_service(self) -> ReplyGenerationService:
         config = self.config_manager.get_config("cltl.reply_generation")
         implementations = config.get("implementations")
-        repliers = []
 
-        if "LenkaReplier" in implementations:
-            from cltl.reply_generation.lenka_replier import LenkaReplier
+        #### TODO for now use a replier factory to create a replier per scenario until we have a final solution ####
 
-            llamalize = config.get("llamalize") if "llamalize" in config else False
-            model = config.get("model") if "model" in config else None
-            server = config.get("server") if "server" in config else None
-            url = config.get("url") if "url" in config else None
-            port = config.get("port") if "port" in config else None
-            instruct = config.get("instruct") if "instruct" in config else None
-            temperature = config.get("temperature") if "temperature" in config else None
-            max_tokens = config.get("max_tokens") if "max_tokens" in config else None
-            show_lenka = config.get("show_lenka") if "show_lenka" in config else False
+        if implementations != ["LenkaReplier"]:
+            raise ValueError("Replier implementation must be 'LenkaReplier'")
 
-            if "selector" in config and config["selector"] == "nsp":
-                selector = NSP(config.get("selector_model"))
-            else:
-                thought_options = config.get("thought_options", multi=True) if "thought_options" in config else []
-                randomness = float(config.get("randomness")) if "randomness" in config else 1.0
-                selector = RandomSelector(randomness=randomness, priority=thought_options)
+        from cltl.reply_generation.lenka_replier import LenkaReplier
+        llamalize = config.get("llamalize") if "llamalize" in config else False
+        model = config.get("model") if "model" in config else None
+        server = config.get("server") if "server" in config else None
+        url = config.get("url") if "url" in config else None
+        port = config.get("port") if "port" in config else None
+        instruct = config.get("instruct") if "instruct" in config else None
+        temperature = config.get("temperature") if "temperature" in config else None
+        max_tokens = config.get("max_tokens") if "max_tokens" in config else None
+        show_lenka = config.get("show_lenka") if "show_lenka" in config else False
 
-            credentials = self.config_manager.get_config("credentials.ollama")
-            key = credentials.get("key")
+        if "selector" in config and config["selector"] == "nsp":
+            selector = NSP(config.get("selector_model"))
+        else:
+            thought_options = config.get("thought_options", multi=True) if "thought_options" in config else []
+            randomness = float(config.get("randomness")) if "randomness" in config else 1.0
+            selector = RandomSelector(randomness=randomness, priority=thought_options)
 
-            replier = LenkaReplier(model_name=model, model_server=server, model_url=url, model_port=port, model_key=key,
-                                   instruct=instruct, llamalize=llamalize, temperature=float(temperature),
-                                   max_tokens=int(max_tokens), show_lenka=show_lenka,
-                                   thought_selector=selector)
-            repliers.append(replier)
-        if "RLReplier" in implementations:
-            from cltl.reply_generation.rl_replier import RLReplier
-            # TODO This is OK here, we need to see how this will work in a containerized setting
-            replier = RLReplier(self.brain)
-            repliers.append(replier)
-        if "LlamaReplier" in implementations:
-            from cltl.reply_generation.llama_replier import LlamaReplier
-            replier = LlamaReplier()
-            repliers.append(replier)
-        if "SimpleNLGReplier" in implementations:
-            from cltl.reply_generation.simplenlg_replier import SimpleNLGReplier
-            # TODO This is OK here, we need to see how this will work in a containerized setting
-            replier = SimpleNLGReplier()
-            repliers.append(replier)
-        if not repliers:
-            raise ValueError("Unsupported implementation " + implementations)
+        credentials = self.config_manager.get_config("credentials.ollama")
+        key = credentials.get("key")
 
-        return ReplyGenerationService.from_config(repliers, self.event_bus, self.resource_manager, self.config_manager)
+        replier_factory = lambda: LenkaReplier(model_name=model, model_server=server, model_url=url, model_port=port,
+                                               model_key=key, instruct=instruct, llamalize=llamalize,
+                                               temperature=float(temperature), max_tokens=int(max_tokens),
+                                               show_lenka=show_lenka, thought_selector=selector)
+
+        ##################
+        # repliers = []
+        #
+        # if "LenkaReplier" in implementations:
+        #     from cltl.reply_generation.lenka_replier import LenkaReplier
+        #
+        #     llamalize = config.get("llamalize") if "llamalize" in config else False
+        #     model = config.get("model") if "model" in config else None
+        #     server = config.get("server") if "server" in config else None
+        #     url = config.get("url") if "url" in config else None
+        #     port = config.get("port") if "port" in config else None
+        #     instruct = config.get("instruct") if "instruct" in config else None
+        #     temperature = config.get("temperature") if "temperature" in config else None
+        #     max_tokens = config.get("max_tokens") if "max_tokens" in config else None
+        #     show_lenka = config.get("show_lenka") if "show_lenka" in config else False
+        #
+        #     if "selector" in config and config["selector"] == "nsp":
+        #         selector = NSP(config.get("selector_model"))
+        #     else:
+        #         thought_options = config.get("thought_options", multi=True) if "thought_options" in config else []
+        #         randomness = float(config.get("randomness")) if "randomness" in config else 1.0
+        #         selector = RandomSelector(randomness=randomness, priority=thought_options)
+        #
+        #     credentials = self.config_manager.get_config("credentials.ollama")
+        #     key = credentials.get("key")
+        #
+        #     replier = LenkaReplier(model_name=model, model_server=server, model_url=url, model_port=port, model_key=key,
+        #                            instruct=instruct, llamalize=llamalize, temperature=float(temperature),
+        #                            max_tokens=int(max_tokens), show_lenka=show_lenka,
+        #                            thought_selector=selector)
+        #     repliers.append(replier)
+        # if "RLReplier" in implementations:
+        #     from cltl.reply_generation.rl_replier import RLReplier
+        #     # TODO This is OK here, we need to see how this will work in a containerized setting
+        #     replier = RLReplier(self.brain)
+        #     repliers.append(replier)
+        # if "LlamaReplier" in implementations:
+        #     from cltl.reply_generation.llama_replier import LlamaReplier
+        #     replier = LlamaReplier()
+        #     repliers.append(replier)
+        # if "SimpleNLGReplier" in implementations:
+        #     from cltl.reply_generation.simplenlg_replier import SimpleNLGReplier
+        #     # TODO This is OK here, we need to see how this will work in a containerized setting
+        #     replier = SimpleNLGReplier()
+        #     repliers.append(replier)
+        # if not repliers:
+        #     raise ValueError("Unsupported implementation " + implementations)
+
+        return ReplyGenerationService.from_config(replier_factory, self.event_bus, self.resource_manager, self.config_manager)
 
     def start(self):
         logger.info("Start Repliers")
