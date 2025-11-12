@@ -223,12 +223,12 @@ class ReplierContainer(BrainContainer, EmissorStorageContainer, InfraContainer):
     @singleton
     def reply_service(self) -> ReplyGenerationService:
         config = self.config_manager.get_config("cltl.reply_generation")
-        implementations = config.get("implementations")
+        implementations = config.get("implementations", multi=True)
 
         #### TODO for now use a replier factory to create a replier per scenario until we have a final solution ####
 
         if implementations != ["LenkaReplier"]:
-            raise ValueError("Replier implementation must be 'LenkaReplier'")
+            raise ValueError("Replier implementation must be 'LenkaReplier', was " + str(implementations))
 
         from cltl.reply_generation.lenka_replier import LenkaReplier
         llamalize = config.get("llamalize") if "llamalize" in config else False
