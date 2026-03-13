@@ -153,6 +153,17 @@ Distributed under the MIT License. See individual app LICENSE files for more inf
 ## Citation
 
 If you use these applications or the EMISSOR framework in your research, please cite:
+```bibtex
+@article{baier2025modular,
+  title={A modular architecture for creating multimodal embodied agents with an episodic Knowledge Graph as an explainable and controllable long-term memory},
+  author={Baier, Thomas and Santamar{\'\i}a, Selene B{\'a}ez and Vossen, Piek},
+  journal={Dialogue \& Discourse},
+  volume={16},
+  number={3},
+  pages={25--59},
+  year={2025}
+}
+```
 
 ```bibtex
 @inproceedings{emissor:2021,
