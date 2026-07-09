@@ -54,29 +54,6 @@ services:
     networks:
       - eliza-client-network
 
-  eliza-app:
-    build:
-      context: .
-      args:
-        base_image: ghcr.io/leolani/cltl-base:${VERSION:-latest}
-    container_name: eliza-client-app
-    volumes:
-      - ./config:/app/config
-      - ./storage:/app/storage
-    environment:
-      - CLTL_LOGGING_CONFIG=/app/config/logging.config
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      eliza-backend:
-        condition: service_healthy
-      eliza-context:
-        condition: service_started
-      eliza-chatui:
-        condition: service_started
-    networks:
-      - eliza-client-network
-
 networks:
   eliza-client-network:
     driver: bridge
