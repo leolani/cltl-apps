@@ -1,7 +1,7 @@
 services:
-  uai-client-backend:
+  eliza-backend:
     image: ghcr.io/leolani/cltl-backend:${VERSION:-latest}
-    container_name: uai-client-backend
+    container_name: eliza-client-backend
     ports:
       - "9001:8000"
     volumes:
@@ -18,7 +18,7 @@ services:
       start_period: 30s
       retries: 3
     networks:
-      - uai-client-network
+      - eliza-client-network
 
   uai-client-context:
     image: ghcr.io/leolani/cltl-context:${VERSION:-latest}
