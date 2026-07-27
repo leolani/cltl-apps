@@ -108,30 +108,22 @@ Event-bus-server:
 1. Browser address:http://localhost:8003/chatui/static/chat.html
 
 
-### Data elements
+##### Audio and image 
 
+Combining audio and image input, processed through VAD, ASR and ImageR:
 
 Multimodal input is captured through camera, microphone and text channels:
 
 <img src="images/leolani-multimodal-input.png" alt="Leolani multimodal input" width="50%">
 
-##### Audio chat response
-
-
-##### Audio and image chat response
-
-Combining audio and image input, processed through VAD, ASR and ImageR:
-
-<img src="images/leolani-audio-image-chat-reponse.png" alt="Leolani audio and image chat response" width="50%">
-
-<img src="images/leolani-client-modules.png" alt="Leolani client modules" width="50%">
-
 The full set of client modules, covering voice activity detection (VAD), speech recognition (ASR), image recognition (ImageR) and response generation (LLM / Eliza):
 
-
-
-#### Annotations
+##### Knowledge Graph
 
 Annotations, such as interpretations and thoughts, are represented as triples and combined into a knowledge graph of claims:
 
 <img src="images/leolani-audio-image-chat-knowledge-graph-response.png" alt="Leolani audio, image chat and knowledge graph response" width="50%">
+
+
+#### Annotations
+
