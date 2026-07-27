@@ -28,7 +28,6 @@ For every Leolani application, we need a server for the ```event-bus``` and ```e
 The user interaction is shown here at the top as a green component with a key-board input for the user through a chat User Interface (chat-ui). The blue boxes 
 represent the server modules.
 
-
 ### Text chat application
 
 The previous architecture only records text messages but does not respond. 
@@ -51,8 +50,9 @@ Both servers can use the same chat-only client to get the user input and display
 #### Required components
 
 User-interaction client:
-- uai-client-context: creates a new interaction scenario and stops it
-- uai-client-chatui: browser chat interface to enter and display text messages
+- uai-client-backend (ghcr.io/leolani/cltl-backend): 
+- uai-client-context (ghcr.io/leolani/cltl-context): creates a new interaction scenario and stops it
+- uai-client-chatui (ghcr.io/leolani/cltl-chat-ui): browser chat interface to enter and display text messages
 
 Event-bus-server:
 - rabbitmq (rabbitmq:3.12-management): keeps track of incoming and outgoing messages
@@ -84,8 +84,28 @@ Also notice that the ```emissor``` module now stores both text and audio signals
 
 At the client side, the application waits for text signals as a response from the agent. In this cases, they are not only displayed in the chat UI but also rendered as speech through the speaker.
 
-This architecture loads additional docker images with respect to the previous set up, both for the client and the server:
+This architecture needs additional docker images with respect to the previous set up for the server and a separate install for the client that picks up audio (and image) signals:
 
+User-interaction client:
+- run_host_server.sh
+
+Event-bus-server:
+- (ghcr.io/leolani/cltl-vad)
+- (ghcr.io/leolani/cltl-asr)
+
+#### How to run:
+
+```Launch the server:```
+1. cd to the docker-eliza-server
+2. docker compose up
+
+```Launch the client:```
+1. cd to the docker-client folder:
+2. ./run_host_server.sh to install and launch the image and audio server
+3. docker compose up
+
+```Open the chaUI:```
+1. Browser address:http://localhost:8003/chatui/static/chat.html
 
 
 ### Data elements
