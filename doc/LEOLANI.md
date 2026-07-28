@@ -1,11 +1,34 @@
-# The Leolani Platform
+# Leolani agents
 
 This repository contains a range of conversational agents built with the Leolani platform.
-The agents all share the same Leolani core modules but have different add-on extension for generating the agent response, 
-for dealing with multimodal input streams and for types of embodiment.
+The agents all share the same Leolani core modules but have different add-on extensions for processing input signals and 
+generating the agent response. Some agents use the classical Eliza program to respond to user input, others use a generative Large Language Model (LLM)
+and yet others reason over a Knowledge Graph to generate a response. Furthermore, the agents can deal with chat, audio and image signals 
+and can connect to any external LLM.
 
-Below, we will first explain the overall architecture of the Leolani platform and next explain how different agents can be built from the building blocks.
+We will explain the core of the Leolani platform first 
+and next what the architectures are of the different conversational agents and how they can be built by extending the core installation. 
+Each agent consists of a client application that allows the user to interact and a server application that processes input
+and generates a response. The client application and the agent server can run on the same or on different machines. 
+Finally, the client can be a browser interface to chat or use the microphone or camera of the local device where the client runs. 
+However, the client can also connect with an embodiment such as a robot. The next image shows a high-level overview of the possible
+client-server-embodiment set-ups:
+
+<img src="images/leolani-overview.png" alt="Leolani basic architecture" width="50%">
+
+The core module and the agents components are available as Docker images that can be combined. It is also possible to develop your own module
+and your own agent application on top of the docker components. Below, we will first explain the overall architecture of the Leolani platform and next explain how different agents can be built from the building blocks.
 Finally, we explain how you can integrate your own module to connect to the event-bus.
+
+
+## Prerequisites
+
+All the 
+| Requirement | Minimum version | Notes |
+|---|---|---|
+| Docker | 23.0 | |
+| Docker Compose | 2.10 | |
+
 
 ## Leolani architecture overview
 
@@ -16,8 +39,7 @@ In addition to keeping track of incoming signals, the scenario data are also rec
 The ```emissor``` module saves the meta data for a scenario in a JSON file and any captured signals in a signal specific JSON file. 
 When an interaction stops, the data is recorded in the ```emissor``` scenario and can be replayed.
 
-### Text chat recording
-The most simple variant of the Leolani architecture uses plain text signals that a user can type in a chat User Interface.
+The most basic variant of the Leolani architecture uses plain text signals that a user can type in a chat User Interface.
 When started, a new scenario is initiated in the ```event-bus``` and the corresponding folder is created in ```emissor``` format on disk.
 Each message that is typed by the user is saved as a ```Text signal``` in the event bus and also saved in the ```emissor text.json```.
 The next image gives schematic overview of such an archtuecture that just records the text that a user enters:
@@ -93,20 +115,30 @@ Event-bus-server:
 - (ghcr.io/leolani/cltl-vad)
 - (ghcr.io/leolani/cltl-asr)
 
+####  Additional requirements
+
+In addition to the Docker images, this application also needs the following to run the backend server that captures the audio from the microphone:
+
+| Requirement | Minimum version | Notes |
+| Python | 3.8+ | For the host backend server (audio capture) |
+| PortAudio | — | `portaudio19-dev` on Debian/Ubuntu; `portaudio` via Homebrew on macOS |
+
+
 #### How to run:
 
-```Launch the server:```
+```i. Launch the server:```
 1. cd to the docker-eliza-server
 2. docker compose up
 
-```Launch the client:```
+```ii. Launch the client:```
 1. cd to the docker-client folder:
 2. ./run_host_server.sh to install and launch the image and audio server
 3. docker compose up
 
-```Open the chaUI:```
+```iii. Open the chaUI:```
 1. Browser address:http://localhost:8003/chatui/static/chat.html
 
+See the [README](../docker-client/README.md)) of the ```docker client``` for further details.
 
 ##### Audio and image 
 
