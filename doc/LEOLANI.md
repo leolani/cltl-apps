@@ -152,7 +152,6 @@ At the client side, the application waits for output Text Signals as agent respo
 
 This architecture needs additional Docker images for new modules of the server and a separate installation of the backend server for the client that picks up audio signals:
 
-
 User-interaction client:
 - run_host_server.sh
 
@@ -167,7 +166,6 @@ In addition to the Docker images, this application also needs the following to r
 | Requirement | Minimum version | Notes |
 | Python | 3.8+ | For the host backend server (audio capture) |
 | PortAudio | — | `portaudio19-dev` on Debian/Ubuntu; `portaudio` via Homebrew on macOS |
-
 
 #### How to run:
 
@@ -185,7 +183,7 @@ In addition to the Docker images, this application also needs the following to r
 
 See the [README](../docker-client/README.md)) of the ```docker client``` for further details.
 
-##### Audio and image 
+### Audio and image 
 
 Combining audio and image input, processed through VAD, ASR and ImageR:
 
@@ -197,7 +195,7 @@ Multimodal input is captured through camera, microphone and text channels:
 
 The full set of client modules, covering voice activity detection (VAD), speech recognition (ASR), image recognition (ImageR) and response generation (LLM / Eliza):
 
-##### Knowledge Graph
+### Integrating a Knowledge Graph
 
 Annotations, such as interpretations and thoughts, are represented as triples and combined into a knowledge graph of claims:
 
@@ -206,5 +204,8 @@ Annotations, such as interpretations and thoughts, are represented as triples an
 *Figure 6: Knowledge graph representation of interpretations and thoughts as claims.*
 
 
-#### Annotations
+### Integrating your own module
+
+### Creating a pipeline
+
 
