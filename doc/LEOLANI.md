@@ -320,6 +320,7 @@ Details of the pipeline architecture are explained in [Baier et al 2026](https:/
 ## Citation
 If you use these applications or the EMISSOR framework in your research, please cite:
 
+```bibtex
 @article{baier2025modular,
   title={A modular architecture for creating multimodal embodied agents with an episodic Knowledge Graph as an explainable and controllable long-term memory},
   author={Baier, Thomas and Santamar{\'\i}a, Selene B{\'a}ez and Vossen, Piek},
@@ -336,5 +337,6 @@ If you use these applications or the EMISSOR framework in your research, please 
     booktitle = {Proceedings of the MMSR workshop "Beyond Language: Multimodal Semantic Representations", IWSC2021},
     year = {2021}
 }
+```
 
 _
