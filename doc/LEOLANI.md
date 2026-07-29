@@ -107,22 +107,41 @@ The client and the servers are available as Docker images:
 
 The client and server directories contain a ```docker-compose.yml``` file that defines the Docker images needed and any other settings.
 
-#### How to run:
+#### How to run ELIZA-chat from the command line:
 
-```i. Launch the server:```
-1. cd to the docker-eliza-server
-2. docker compose up
+**i. Launch the server:**
+```commandline
+cd docker-eliza-server
+docker compose up
+```
 
-```ii. Launch the client:```
-1. cd to the docker-chat-client folder:
-2. ./run_host_server.sh to install and launch the image and audio server
-3. docker compose up
+The ```docker compose up``` command uses the docker-compose.yml file to load the images from DockerHub and set the configuration for the server.
+The first time you run it, the images need to be downloaded from the web and the application needs to be constructed on your server machine.
+The next time you run it, it checks if there are updates for the images. If so, the latest version is pulled from the web.
+Otherwise, the local installation is launched immediately. Pulling the images may take some time depending on the speed of the Internet connection.
 
-```iii. Open the chaUI:```
-1. Browser address:http://localhost:8003/chatui/static/chat.html
+**ii. Launch the client:**
 
+The client is also a Docker image that is loaded and launched through the ```docker-compose.yml``` file in the client folder.
+When the server is running, you can fire up the client Docker image in another terminal:
+
+```commandline
+cd docker-client
+docker compose up
+```
+
+**iii. Open the chaUI:**
+
+If both the server and client are stable, open a web browser with the following address:
+
+```url
+http://localhost:8003/chatui/static/chat.html
+```
+
+You will see a chat interface in which the conversation is displayed. 
 See the [README](../docker-client/README.md)) of the ```docker client``` for further details.
 
+You stop the application using CTRL-C in the server and client terminal and by closing the web browser TAB.
 
 ### Audio chat application
 
@@ -167,21 +186,37 @@ In addition to the Docker images, this application also needs the following to r
 | Python | 3.8+ | For the host backend server (audio capture) |
 | PortAudio | — | `portaudio19-dev` on Debian/Ubuntu; `portaudio` via Homebrew on macOS |
 
-#### How to run:
+#### How to run ELIZA-talk from the command line:
 
-```i. Launch the server:```
-1. cd to the docker-eliza-server
-2. docker compose up
+**i. Launch the server:**
+```commandline
+cd docker-eliza-server
+docker compose up
+```
 
-```ii. Launch the client:```
-1. cd to the docker-client folder:
-2. ./run_host_server.sh to install and launch the image and audio server
-3. docker compose up
+**ii. Launch the client:**
 
-```iii. Open the chaUI:```
-1. Browser address:http://localhost:8003/chatui/static/chat.html
+Before we launch the Docker image for the client, we now need to run a server on the local machine to capture the audio signals.
+The installation and launch of the server needs to be done in a separate terminal through the ```run_host_sever.sh``` script that
+can be found in the client folder:
 
+```commandline
+cd docker-client
+./run_host_server.sh
+```
+
+When the servers are running, you can fire up the client Docker image in another terminal:
+
+```commandline
+cd docker-client
+docker compose up
+```
+**iii. Open the chaUI:**
+```url
+http://localhost:8003/chatui/static/chat.html
+```
 See the [README](../docker-client/README.md)) of the ```docker client``` for further details.
+
 
 ### Audio and image 
 
