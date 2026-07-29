@@ -28,8 +28,17 @@ It is possible to develop your own module and your own agent application on top 
 Below, we will first explain the overall architecture of the Leolani platform with the core modules and, next, explain how different agents can be built from the building blocks.
 Finally, we explain how you can make your own module to run in the client machine in combination with the server to process signals.
 
+1. Prerequisites
+2. Overall Leolani architecture
+3. Text chat application
+4. Audio chat application
+5. Audio and Image chat application
+6. Knowledge Graph Integration
+7. Adding your own module 
+8. Creating a pipeline
 
-## Prerequisites
+
+## 1. Prerequisites
 
 All the architectures described below require that [Docker](https://docs.docker.com/engine/install/) is installed:
 ```
@@ -45,7 +54,7 @@ Furthermore, clone the current repository somewhere on Disk:
 git clone git@github.com:leolani/cltl-apps.git
 ```
 
-## Leolani architecture overview
+## 2. Overall Leolani architecture
 
 The core module of Leolani is the ```event-bus``` that keeps track of incoming signals during for a specific scenario.
 It uses a temporal ruler with a start time to keep track of any signals that are pushed at any moment in time. 
@@ -66,7 +75,7 @@ For every Leolani application, we need a server for the ```event-bus``` and ```e
 The user interaction is shown here at the top as a green component with a key-board input for the user through a chat User Interface (chat-ui). The blue boxes 
 represent the server modules.
 
-### Text chat application
+## 3. Text chat application
 
 The previous architecture only records text messages but does not respond. 
 In order to turn this into a conversational agent, we need to add a module that can pull a signal form the ```event-bus``` and publish a new signal as a response.
@@ -78,8 +87,10 @@ The response is a new ```Text Signal``` that is published on the ```event-bus```
 *Figure 3: Text chat architecture where a communication module generates a response via the LLM or Eliza module.*
 
 The ChatUI in the client program will listen to the ```event-bus``` for any ```Text Signal``` registered as a response from the agent and will display this to the user.
+Figure 3 shows how the client and server applications are separated. They can run on the same machine or on different machines.
+If the server is installed on a remote machine the URL mappings from client to server need to be adapted to make a connection (see below).
 
-There are two chat-only applications in this repository one that uses Eliza to respond and the other that uses an LLM:
+There are two chat-only server applications in this repository one that uses Eliza to respond and the other that uses an LLM:
 
 - docker-eliza-server
 - docker-llm-server
@@ -90,7 +101,7 @@ Both servers use the same chat-only client to get the user input and display the
 
 The client and the servers are available as Docker images:
 
-#### Docker images
+### Docker images
 
 *User-interaction client*:
 - uai-client-backend (ghcr.io/leolani/cltl-backend): 
@@ -107,7 +118,7 @@ The client and the servers are available as Docker images:
 
 The client and server directories contain a ```docker-compose.yml``` file that defines the Docker images needed and any other settings.
 
-#### How to run ELIZA-chat from the command line:
+### How to run ELIZA-chat from the command line:
 
 **i. Launch the server:**
 ```commandline
@@ -143,7 +154,7 @@ See the [README](../docker-client/README.md)) of the ```docker client``` for fur
 
 You stop the application using CTRL-C in the server and client terminal and by closing the web browser TAB.
 
-### Audio chat application
+## 4. Audio chat application
 
 The above set-up can only be used to chat. We can now augment this architecture with speech processing such that a user can have a spoken dialogue instead of typed chat messages.
 The global architecture for this is shown below:
@@ -178,7 +189,7 @@ Event-bus-server:
 - (ghcr.io/leolani/cltl-vad)
 - (ghcr.io/leolani/cltl-asr)
 
-####  Additional requirements
+###  Additional requirements
 
 In addition to the Docker images, this application also needs the following to run the backend server that captures the audio from the microphone:
 
@@ -186,7 +197,7 @@ In addition to the Docker images, this application also needs the following to r
 | Python | 3.8+ | For the host backend server (audio capture) |
 | PortAudio | — | `portaudio19-dev` on Debian/Ubuntu; `portaudio` via Homebrew on macOS |
 
-#### How to run ELIZA-talk from the command line:
+### How to run ELIZA-talk from the command line:
 
 **i. Launch the server:**
 ```commandline
@@ -218,7 +229,7 @@ http://localhost:8003/chatui/static/chat.html
 See the [README](../docker-client/README.md)) of the ```docker client``` for further details.
 
 
-### Audio and image 
+## 5. Audio and image 
 
 Combining audio and image input, processed through VAD, ASR and ImageR:
 
@@ -230,7 +241,7 @@ Multimodal input is captured through camera, microphone and text channels:
 
 The full set of client modules, covering voice activity detection (VAD), speech recognition (ASR), image recognition (ImageR) and response generation (LLM / Eliza):
 
-### Integrating a Knowledge Graph
+## 6. Knowledge Graph integration
 
 Annotations, such as interpretations and thoughts, are represented as triples and combined into a knowledge graph of claims:
 
@@ -238,9 +249,59 @@ Annotations, such as interpretations and thoughts, are represented as triples an
 
 *Figure 6: Knowledge graph representation of interpretations and thoughts as claims.*
 
+This architecture only requires a Knowledge Graph server and the ```docker-kg-server``` to be launched with the right connection settings to the Knowledge Graph.
+As a Knowledge Graphe server, we use GraphDB:
 
-### Integrating your own module
+2. Download [GraphDB](http://graphdb.ontotext.com/)
+2. Launch it
+3. Create a repository, you can use [this configuration](https://github.com/leolani/cltl-knowledgerepresentation/blob/main/src/cltl/brain/ontologies/BASIC-REPOSITORY-CONFIG-GRAPHDB.ttl)
 
-### Creating a pipeline
+## 7. Adding your own module
 
+Modules to process signals are registered at the server side and run on the server machine. 
+It is also possible to develop your own module and run it locally.
+This module checks the event-bus for any signals or annotations that it requires as input.
+It will pull the data from the event-bus, process it an push back a signal or annotation to the event-bus,
+where other modules can take it up again untill it eventually ends up as a response in the client UI.
 
+An example of such an architecture is shown in the next Figure, where the communication module runs locally on the client machine
+and calls an LLM to interpret the data that is pulled from the event bus:
+
+<img src="images/leolani-client-modules.png" alt="Leolani audio, image chat and knowledge graph response" width="50%">
+
+*Figure 7: Local client modules that connect to the event-bus.*
+
+## 8. Creating a pipeline
+
+The processing modules that operate on the event-bus run independently in separate threads. 
+To form a pipeline, the event-bus server registers the modules as so-called ```Topic Workers``` in a configuration file.
+The input and output of each module is defined as a ```topic``` with a name. 
+By aligning the input name of a module with the output of another module, a pipeline connection can be created.
+For example:
+
+```commandline
+
+```
+Details of the pipeline architecture are explained in [Baier et al 2026](https://journals.uic.edu/ojs/index.php/dad/article/view/13303).
+
+## Citation
+If you use these applications or the EMISSOR framework in your research, please cite:
+
+@article{baier2025modular,
+  title={A modular architecture for creating multimodal embodied agents with an episodic Knowledge Graph as an explainable and controllable long-term memory},
+  author={Baier, Thomas and Santamar{\'\i}a, Selene B{\'a}ez and Vossen, Piek},
+  journal={Dialogue \& Discourse},
+  volume={16},
+  number={3},
+  pages={25--59},
+  year={2025}
+}
+@inproceedings{emissor:2021,
+    title = {EMISSOR: A platform for capturing multimodal interactions as Episodic Memories and Interpretations with Situated Scenario-based Ontological References},
+    author = {Selene Baez Santamaria and Thomas Baier and Taewoon Kim and Lea Krause and Jaap Kruijt and Piek Vossen},
+    url = {https://mmsr-workshop.github.io/programme},
+    booktitle = {Proceedings of the MMSR workshop "Beyond Language: Multimodal Semantic Representations", IWSC2021},
+    year = {2021}
+}
+
+_
