@@ -242,7 +242,7 @@ Combining audio and image input, processed through VAD, ASR and ImageR:
 
 Multimodal input is captured through camera, microphone and text channels:
 
-<img src="images/leolani-multimodal-input.png" alt="Leolani multimodal input" width="50%">
+<img src="images/leolani-audio-image-chat-response.png" alt="Leolani multimodal input" width="50%">
 
 *Figure 5: Multimodal input captured through camera, microphone and text channels.*
 
