@@ -1,0 +1,19 @@
+# Build path B — rungs 1-2 only (attach/example.ipynb, attach/listen.py).
+#
+# No meta-repo, no cltl-requirements mirror: this installs cltl.combot and
+# emissor straight from their GitHub repos on the branch this platform is
+# currently built from. That means it resolves whatever is on that branch
+# TODAY, not a pinned version — a payload dataclass or serializer change on
+# that branch shows up here as an unmarshal error against a running
+# deployment, with no version mismatch to point at. Path A (`make build`
+# inside a cltl-dev checkout, see the README) is the one that pins versions;
+# use this one only to get a notebook running with no meta-repo checkout.
+#
+# emissor's setup.py still declares `namespace_packages=['emissor']`, a
+# pkg_resources-era API that only resolves cleanly under Python 3.10 — the
+# version this platform is built and tested against (see /.python-version at
+# the root of a cltl-dev checkout). A newer interpreter may warn or fail here.
+git+https://github.com/leolani/emissor.git@ref_scenarios
+git+https://github.com/leolani/cltl-combot.git@ref_scenarios#egg=cltl.combot[external]
+requests
+kombu

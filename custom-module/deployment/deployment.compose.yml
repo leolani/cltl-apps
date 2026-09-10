@@ -1,0 +1,105 @@
+# A Leolani deployment, from published images. Nothing is built here.
+#
+# This is the thing cltl-example attaches TO. It is deliberately the smallest
+# deployment that makes a conversation happen — a broker, a chat UI, ELIZA, and
+# the context/BDI loop that opens a scenario and runs the init handshake. No
+# audio: no backend, no VAD, no ASR. Those need a microphone, a storage volume
+# and a ~140 MB model download, and none of it changes what attaching to the
+# event bus looks like.
+#
+#   docker compose -f deployment/deployment.compose.yml up
+#
+# Then open http://127.0.0.1:8000/chatui/static/chat.html.
+#
+# `name:` below pins the compose project. Without it the project would be
+# named after this file's PARENT DIRECTORY — `deployment` — rather than after
+# the repository, which also makes the network `deployment_cltl`. Rung 4 has
+# to name that network to join it (see docs/docker.md), so it is worth having
+# a name that says what it is and does not move.
+#
+# The images come from ghcr.io/leolani and are public; the first `up` pulls
+# them. Pin a release instead of tracking `latest` by setting CLTL_IMAGE_TAG.
+#
+# The full platform deployment — every module, audio included, plus the
+# client/server split — lives in the cltl-dev repository at
+# integration/compose/docker-compose.yml. This file is a reduction of it, not
+# a replacement, and does not try to stay in step with it.
+
+name: cltl-example-deployment
+
+x-cltl-env: &cltl-env
+  # The container-side view of the network: `rabbitmq` is a service name here.
+  # A process OUTSIDE this network (rungs 1-2 — the notebook and listen.py)
+  # uses 127.0.0.1 and the published port instead. Both reach the same broker.
+  CLTL_AMQP_URL: amqp://leolani:leolani@rabbitmq:5672/
+  # $VAR interpolation happens when the config is READ, and an undefined
+  # variable is passed through as the literal string with only a warning — so
+  # every variable default.config interpolates is declared here, even empty.
+  # An unset CLTL_TENANT would have KombuEventBus bind the queue
+  # `cltl.topic.text_in.$CLTL_TENANT`, which nothing ever routes to.
+  CLTL_TENANT: "${CLTL_TENANT:-}"
+
+x-cltl-service: &cltl-service
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+  restart: "no"
+  networks:
+    - cltl
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    environment:
+      RABBITMQ_DEFAULT_USER: leolani
+      RABBITMQ_DEFAULT_PASS: leolani
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      # Published so that rungs 1-2 can reach the broker from outside the
+      # compose network. Fixed host ports, unlike the integration harness's
+      # ephemeral ones: this deployment is meant to be talked to by a human
+      # following a document, and a port that changes every run cannot be
+      # written down. The cost is that a second copy of this stack collides.
+      - "${CLTL_AMQP_PORT:-5672}:5672"
+      - "${CLTL_MANAGEMENT_PORT:-15672}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+    networks:
+      - cltl
+
+  chatui:
+    <<: *cltl-service
+    image: ghcr.io/leolani/cltl-chat-ui:${CLTL_IMAGE_TAG:-latest}
+    ports:
+      - "${CLTL_CHATUI_PORT:-8000}:8000"
+    volumes:
+      - ./config:/cltl-chatui/config:ro
+    environment:
+      <<: *cltl-env
+      CLTL_LOGGING_CONFIG: /cltl-chatui/config/logging.config
+
+  eliza:
+    <<: *cltl-service
+    image: ghcr.io/leolani/cltl-eliza:${CLTL_IMAGE_TAG:-latest}
+    volumes:
+      - ./config:/cltl-eliza/config:ro
+    environment:
+      <<: *cltl-env
+      CLTL_LOGGING_CONFIG: /cltl-eliza/config/logging.config
+
+  context:
+    <<: *cltl-service
+    image: ghcr.io/leolani/cltl-context:${CLTL_IMAGE_TAG:-latest}
+    volumes:
+      - ./config:/cltl-context/config:ro
+    environment:
+      <<: *cltl-env
+      CLTL_LOGGING_CONFIG: /cltl-context/config/logging.config
+
+networks:
+  cltl:
+    driver: bridge

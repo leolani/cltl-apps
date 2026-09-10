@@ -1,0 +1,13 @@
+.[service]
+pytest
+# Not a dependency of the installed distribution — attach/connect.py (rungs
+# 1-2) uses it to poll RabbitMQ's management API, and tests/test_examples.py
+# imports that module directly. Listed here so `make build`'s venv can run
+# both the installed package and everything else in this repository.
+requests
+
+# The Docker image (Dockerfile, rung 4) uses requirements.docker.txt instead
+# of this file: it resolves entirely offline from the first-party sdist
+# registry plus whatever the base image preinstalls, and neither pytest nor
+# requests is available that way. See requirements.docker.txt and
+# docs/docker.md.

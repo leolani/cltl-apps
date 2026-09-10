@@ -1,0 +1,23 @@
+# Copy this to config/custom.config (gitignored — never commit it) to point
+# rung 3 at a real deployment's broker instead of the in-process default.
+#
+#   cp config/custom.config.example config/custom.config
+#   CLTL_AMQP_URL=amqp://eliza:eliza123@127.0.0.1:<port>/ CLTL_TENANT= \
+#       venv/bin/python src/main.py
+#
+# $VAR interpolation happens at READ time (EnvInterpolation, in
+# cltl.combot.infra.config.local), not when this file is parsed. Setting
+# CLTL_TENANT="" explicitly on the command line matters: an *unset* variable is
+# passed through as the literal string "$CLTL_TENANT" with only a
+# logger.warning, and KombuEventBus then treats that literal string as a real
+# tenant name and binds a queue nothing will ever route to. See
+# docs/tenancy.md.
+
+[cltl.event]
+implementation: kombu
+
+[cltl.event.kombu]
+server: $CLTL_AMQP_URL
+exchange: cltl.combot
+compression: bzip2
+tenant: $CLTL_TENANT
