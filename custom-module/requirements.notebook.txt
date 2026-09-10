@@ -14,6 +14,6 @@
 # version this platform is built and tested against (see /.python-version at
 # the root of a cltl-dev checkout). A newer interpreter may warn or fail here.
 git+https://github.com/leolani/emissor.git@ref_scenarios
-git+https://github.com/leolani/cltl-combot.git@ref_scenarios#egg=cltl.combot[external]
+cltl.combot[external] @ git+https://github.com/leolani/cltl-combot.git@ref_scenarios
 requests
 kombu
