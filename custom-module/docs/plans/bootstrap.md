@@ -2,6 +2,13 @@
 
 Status: implemented · Date: 2026-09-09
 
+> **Partly superseded** by [`tenant-isolation.md`](tenant-isolation.md)
+> (2026-09-17), which split the deployment into a shared server and one
+> stack per tenant. Commands on this page naming
+> `deployment/deployment.compose.yml` no longer work — see
+> [`../deployment.md`](../deployment.md). Kept as a record of what was
+> built and why, not as instructions.
+
 ## Why
 
 `cltl-dev`'s `CLAUDE.md` documents how to add a new *platform* component, but

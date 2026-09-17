@@ -18,18 +18,35 @@ time someone tries this:
                           that window is silently dropped by the exchange.
                           Without this, "the first message never arrived"
                           is the most common report this template will get.
+  4. `start_scenario()`  — a tenanted chat UI renders nothing and refuses to
+                          publish until a `ScenarioStarted` arrives on ITS
+                          routing key, and in this template's deployment
+                          nothing opens one for you: there is no cltl-context.
+                          This is NOT something a normal attached module does.
+                          It is the price of running the chat UI inside a
+                          tenant. See docs/tenancy.md.
+
+`new_scenario`/`start_scenario`/`stop_scenario` below are deliberately a copy of
+integration/src/cltl_integration/drivers/scenario.py and a parallel of this
+template's own src/myorg/tenant/scenario.py, rather than an import of either:
+rung 1 has nothing installed. Same reasoning as the echo transform duplicated in
+attach/listen.py — see docs/component.md.
 """
 import logging
 import threading
 import time
+import uuid
 from typing import Iterable, Mapping, Optional
 from urllib.parse import unquote, urlparse
 
 import requests
-from cltl.combot.event.emissor import MEN, SIG
+from cltl.combot.event.emissor import (MEN, SIG, Agent, LeolaniContext,
+                                       ScenarioStarted, ScenarioStopped)
 from cltl.combot.infra.config import Configuration, ConfigurationManager
 from cltl.combot.infra.event.api import PAYLOAD, Event
 from cltl.combot.infra.event.kombu import KombuEventBus
+from cltl.combot.infra.time_util import timestamp_now
+from emissor.representation.scenario import Modality, Scenario
 from emissor.representation.util import marshal, register_type_var, unmarshal
 from kombu.serialization import register as _register_serializer
 
@@ -123,14 +140,17 @@ def event_bus(server: str, tenant: str = "", exchange: str = EXCHANGE,
     """A `KombuEventBus` on someone else's running deployment.
 
     `server` is the AMQP URL — `amqp://leolani:leolani@127.0.0.1:5672/` for
-    the deployment in deployment/deployment.compose.yml (docs/deployment.md).
-    The integration harness's demo stacks use eliza/eliza123 on an ephemeral
-    port instead, printed under `broker` by `make -C integration demo-<name>
+    the deployment in deployment/server.compose.yml (docs/deployment.md). The
+    integration harness's demo stacks use eliza/eliza123 on an ephemeral port
+    instead, printed under `broker` by `make -C integration demo-<name>
     DEMO_FLAGS='--tier compose'`.
 
-    `tenant` empty (the default) subscribes to every tenant on the exchange —
-    fine for a single-tenant deployment, and see docs/tenancy.md before using
-    this against a shared one. A subscriber never steals another consumer's
+    `tenant` names the tenant to join, and on this template's deployment you
+    want one: it is what scopes both what you receive and what you publish.
+    Empty subscribes to every tenant on the exchange, which makes a fine
+    read-only observer but CANNOT open a scenario — an untenanted publish lands
+    on the bare topic key that no tenanted subscriber binds. See docs/tenancy.md.
+    A subscriber never steals another consumer's
     messages regardless: every `subscribe` gets its own server-named,
     exclusive, auto-delete queue.
     """
@@ -144,9 +164,23 @@ def event_bus(server: str, tenant: str = "", exchange: str = EXCHANGE,
         }}))
 
 
+def binding_key(topic: str, tenant: str = "") -> str:
+    """The routing key a subscriber to `topic` binds, as KombuEventBus builds it.
+
+    A tenanted subscriber binds exactly `<topic>.<tenant>`. An untenanted one
+    binds `<topic>.#`, and `#` in RabbitMQ matches ZERO OR MORE words — so it
+    matches every tenant's traffic AND the bare topic. That asymmetry is the
+    whole of the isolation mechanism, which is why it lives here as one
+    testable function rather than inline. Mirrors `ComposeRunner.binding_key`
+    in integration/src/cltl_integration/runner/compose.py.
+    """
+    return f"{topic}.{tenant}" if tenant else f"{topic}.#"
+
+
 def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
                      tenant: str = "", timeout: float = 30.0,
-                     amqp_url: Optional[str] = None) -> None:
+                     amqp_url: Optional[str] = None,
+                     baseline: Optional[Mapping[str, int]] = None) -> None:
     """Block until RabbitMQ has actually bound queues for `topics`.
 
     `KombuEventBus.subscribe` starts a background consumer thread and returns
@@ -163,6 +197,18 @@ def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
     subscription specifically. See
     integration/src/cltl_integration/runner/compose.py:446-513, which this is
     a single-runner-free reduction of.
+
+    `baseline` chooses WHICH question is being asked, and there are two:
+
+    * `None` (the default) snapshots the counts now and waits for them to RISE
+      — "is *my* subscription live", the question every `subscribe()` call
+      wants answered.
+    * `{}` — an all-zero baseline — turns the increment check into a PRESENCE
+      check: "is *anyone* bound to this key yet". That is the question to ask
+      before publishing to a subscriber that is not you, e.g. before opening a
+      scenario the tenant's chat UI has to receive. Same trick, same reason, as
+      `ComposeRunner.await_bindings(topics, {}, tenant)` in the platform's
+      harness (integration/src/cltl_integration/runner/tenants.py).
 
     Without `management_url` (RabbitMQ's management plugin, default port
     15672), there is no way to ask the broker anything, so this falls back to
@@ -185,9 +231,6 @@ def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
         time.sleep(2.0)
         return
 
-    def binding_key(topic: str) -> str:
-        return f"{topic}.{tenant}" if tenant else f"{topic}.#"
-
     parsed = urlparse(amqp_url) if amqp_url else None
     auth = ((unquote(parsed.username or ""), unquote(parsed.password or ""))
             if parsed and parsed.username else ("eliza", "eliza123"))
@@ -207,12 +250,13 @@ def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
             result[key] = result.get(key, 0) + 1
         return result
 
-    before = counts()
+    before = counts() if baseline is None else dict(baseline)
     if before is None:
         time.sleep(2.0)
         return
 
-    wanted = {binding_key(topic): before.get(binding_key(topic), 0) + 1 for topic in topics}
+    wanted = {binding_key(topic, tenant): before.get(binding_key(topic, tenant), 0) + 1
+              for topic in topics}
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         current = counts() or {}
@@ -223,3 +267,69 @@ def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
     raise TimeoutError(
         f"RabbitMQ did not bind the expected queues within {timeout}s: {wanted}. "
         f"A publish now would be silently dropped.")
+
+
+# ---------------------------------------------------------------------------
+# Opening a tenant's conversation.
+#
+# NOT custom functionality, and not something an attached module normally does.
+# It is here because cltl-chat-ui runs INSIDE a tenant (it publishes utterances
+# without source=, so an untenanted one would route to a bare topic key nothing
+# binds), it renders nothing and refuses to publish until it has seen a
+# ScenarioStarted, and a tenant's ScenarioStarted can only be published on that
+# tenant's own bus. This template's deployment runs no cltl-context, so the
+# custom side has to open it. See docs/tenancy.md.
+#
+# A deliberate copy of integration/src/cltl_integration/drivers/scenario.py and
+# a parallel of src/myorg/tenant/scenario.py — rungs 1-2 have nothing installed,
+# which is the point of them.
+# ---------------------------------------------------------------------------
+
+AGENT_URI = "http://cltl.nl/leolani/world/leolani"
+SPEAKER_URI = "http://cltl.nl/leolani/world/human_speaker"
+
+SIGNALS = {
+    Modality.IMAGE.name.lower(): "./image.json",
+    Modality.TEXT.name.lower(): "./text.json",
+    Modality.AUDIO.name.lower(): "./audio.json",
+}
+
+
+def new_scenario(scenario_id: Optional[str] = None, agent: str = "Leolani",
+                 speaker: str = "Human", location: str = "unknown") -> Scenario:
+    """A `Scenario` ready to be announced. `ruler.end` is None — i.e. still open."""
+    context = LeolaniContext(Agent(agent, AGENT_URI), Agent(speaker, SPEAKER_URI),
+                             str(uuid.uuid4()), location, [], [])
+
+    return Scenario.new_instance(scenario_id or str(uuid.uuid4()),
+                                 timestamp_now(), None, context, SIGNALS)
+
+
+def start_scenario(event_bus: KombuEventBus, scenario_topic: str,
+                   scenario_id: Optional[str] = None, **kwargs) -> Scenario:
+    """Publish `ScenarioStarted` and return the scenario.
+
+    Publish it on a TENANTED bus. An untenanted one routes this to the bare
+    `<scenario_topic>` key, which a tenanted chat UI does not bind, so the
+    conversation would open for nobody — silently, as ever.
+
+    Call `wait_until_bound(..., baseline={})` for `scenario_topic` first: the
+    subscriber that has to receive this is the chat UI, not you, so the default
+    "wait for the count to rise" check would be answered by your own queue.
+    """
+    scenario = new_scenario(scenario_id, **kwargs)
+    event_bus.publish(scenario_topic,
+                      Event.for_scenario_payload(scenario.id, ScenarioStarted.create(scenario)))
+
+    return scenario
+
+
+def stop_scenario(event_bus: KombuEventBus, scenario_topic: str, scenario: Scenario) -> None:
+    """Close the conversation. Do this before `bus.close()`, not after.
+
+    The chat UI clears its transcript when a scenario stops, which is how you
+    can see this land rather than taking it on faith.
+    """
+    scenario.ruler.end = timestamp_now()
+    event_bus.publish(scenario_topic,
+                      Event.for_scenario_payload(scenario.id, ScenarioStopped.create(scenario)))

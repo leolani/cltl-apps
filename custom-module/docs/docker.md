@@ -49,52 +49,85 @@ names already filled in, and a deployment only has to supply the **connection
 overlay** — which broker, which tenant. That asymmetry is the thing to
 understand before changing how the config is mounted.
 
-## Joining a running deployment
+## Joining one tenant of a running deployment
 
 `compose/example.compose.yml` attaches one service to a deployment that is
-**already running**. It is not a deployment of its own.
+**already running**. It is not a deployment of its own. You run it once **per
+tenant** — the project name interpolates `CLTL_TENANT`, so tenant-a's module and
+tenant-b's coexist.
 
 With the deployment from [`deployment.md`](deployment.md) up:
 
 ```bash
 make docker-ghcr-build
 
-export CLTL_DEMO_CONFIG=$PWD/deployment/config
-export CLTL_DEMO_NETWORK=cltl-example-deployment_cltl
-docker compose -f compose/example.compose.yml -p cltl-example-module up
+export CLTL_DEMO_CONFIG=$PWD/deployment/config/tenant
+CLTL_TENANT=tenant-a docker compose -f compose/example.compose.yml up -d
+CLTL_TENANT=tenant-b docker compose -f compose/example.compose.yml up -d
 ```
 
-Two variables, and both are worth understanding rather than pasting.
+Three variables, and all three are worth understanding rather than pasting.
 
-**`CLTL_DEMO_NETWORK`** is the deployment's compose network, named
-`<compose project>_cltl`. The deployment file pins its project name explicitly,
-so this is stable wherever you run it from — without that pin, compose would
-name the project after the file's *parent directory* (`deployment`) and the
-network would be `deployment_cltl`. Confirm rather than assume:
+**`CLTL_TENANT`** is the only thing that makes this container tenant-a's rather
+than tenant-b's. It is **required**, at two levels: compose refuses to
+interpolate the project name without it, and `myorg.tenant` refuses to start on
+an empty or unexpanded value. Both refusals exist because the failure they
+prevent is silent — see [`tenancy.md`](tenancy.md).
+
+**`CLTL_SERVER_NETWORK`** defaults to `cltl-example`, the network
+`deployment/server.compose.yml` creates and pins by name. Note what it is *not*:
+it is the **server's** network, shared by every tenant, so joining it is how this
+container reaches the broker and is emphatically not what scopes it to a tenant.
+Against the integration harness's stacks the name is randomised, so confirm
+rather than assume:
 
 ```bash
 docker network ls --format '{{.Name}}' | grep cltl
 ```
 
-**`CLTL_DEMO_CONFIG`** is the directory holding the deployment's configuration.
-The compose file mounts **one file** out of it — the deployment's
-`default.config`, over this image's `config/custom.config`, where the platform's
-loader reads it as an overlay on top of the `default.config` already baked into
-the image. That is the asymmetry from the previous section in practice: the
-image brings its own `[myorg.example]` section, the deployment brings the
-broker connection, and the two are merged by the config loader.
+**`CLTL_DEMO_CONFIG`** is the directory holding the deployment's configuration —
+the **tenant** half, `deployment/config/tenant`, because that is the one
+carrying `tenant: $CLTL_TENANT`. The compose file mounts **one file** out of it:
+that `default.config`, over this image's `config/custom.config`, where the
+platform's loader reads it as an overlay on top of the `default.config` already
+baked into the image. That is the asymmetry from the previous section in
+practice: the image brings its own `[myorg.example]` and `[myorg.tenant]`
+sections, the deployment brings the broker connection, and the two are merged by
+the config loader.
 
 Finally, every `$VAR` that the mounted config interpolates must be defined in
 the container's environment, **even when empty** — an undefined one is passed
 through as a literal string with only a warning, never a hard failure. See
 [`tenancy.md`](tenancy.md) for what that specifically breaks.
 
+### One module per tenant, and the scenario race
+
+Each module container opens its own tenant's scenario at startup, after waiting
+`[myorg.tenant] start_delay` seconds. That wait is a guess, and unlike rungs 1–2
+this container **cannot** do better: `requests` is not in the base image, so it
+cannot poll RabbitMQ's management API, and `depends_on` does not reach across
+compose projects to the tenant's chat UI.
+
+If the guess loses, that tenant's chat UI stays blank with nothing logged.
+`docker compose -f compose/example.compose.yml restart example` fixes it;
+raising `start_delay` fixes it properly.
+
+If you are *also* running `attach/listen.py` against the same tenant, set
+`[myorg.tenant] start_scenario: false` here or pass `--no-scenario` there. Two
+openers for one tenant is not fatal but it is confusing — see
+[`tenancy.md`](tenancy.md#two-openers-one-tenant).
+
 ## Joining a deployment you built yourself
 
-The same two things: a config file carrying the deployment's broker settings,
-and its compose network name (`docker network ls`, or `docker compose -p
-<project> ps` to find the project). Nothing else in
+The same three things: a config file carrying the deployment's broker settings
+and its tenant, the compose network name (`docker network ls`, or `docker
+compose -p <project> ps` to find the project), and a tenant id. Nothing else in
 `compose/example.compose.yml` changes.
+
+If your deployment is single-tenant, leave `CLTL_TENANT` empty in the mounted
+config and set `[myorg.tenant] start_scenario: false` — or, better, delete
+`myorg.tenant` altogether, since a single-tenant deployment has a
+`cltl-context` that can open the scenario itself.
 
 If your deployment *does* know about your module — because you added a section
 for it to the deployment's own configuration — then you are no longer a

@@ -1,17 +1,26 @@
 # Copy this to config/custom.config (gitignored — never commit it) to point
-# rung 3 at a real deployment's broker instead of the in-process default.
+# rung 3 at a real deployment's broker instead of the in-process default, as
+# one tenant of it.
 #
 #   cp config/custom.config.example config/custom.config
-#   CLTL_AMQP_URL=amqp://eliza:eliza123@127.0.0.1:<port>/ CLTL_TENANT= \
+#   CLTL_AMQP_URL=amqp://leolani:leolani@127.0.0.1:5672/ CLTL_TENANT=tenant-a \
 #       venv/bin/python src/main.py
 #
+# CLTL_TENANT is NOT optional and must NOT be empty. This component opens the
+# tenant's scenario (see [myorg.tenant] in config/default.config), and an
+# untenanted bus publishes on the bare 'cltl.topic.scenario' routing key, which
+# no tenanted chat UI binds — the scenario would reach nobody and the chat UI
+# would stay blank forever. myorg.tenant refuses to start rather than let that
+# happen; set [myorg.tenant] start_scenario to false if something else opens
+# the scenario for this tenant.
+#
 # $VAR interpolation happens at READ time (EnvInterpolation, in
-# cltl.combot.infra.config.local), not when this file is parsed. Setting
-# CLTL_TENANT="" explicitly on the command line matters: an *unset* variable is
-# passed through as the literal string "$CLTL_TENANT" with only a
-# logger.warning, and KombuEventBus then treats that literal string as a real
-# tenant name and binds a queue nothing will ever route to. See
-# docs/tenancy.md.
+# cltl.combot.infra.config.local), not when this file is parsed. An *unset*
+# variable is passed through as the literal string "$CLTL_TENANT" with only a
+# logger.warning, and KombuEventBus then treats that literal as a real tenant
+# name and binds a real, valid, permanently empty queue. That refusal at
+# startup is the only thing standing between you and a deployment that is
+# entirely healthy and connected to nothing. See docs/tenancy.md.
 
 [cltl.event]
 implementation: kombu

@@ -56,6 +56,13 @@ class _DictConfigurationManager:
 class ApplicationContainer(ExampleContainer):
     """Exactly what a deployment does — see docs/component.md — reduced to one
     module and one in-process bus, with no broker and no other containers.
+
+    `ExampleContainer` alone, deliberately: unlike `src/main.py` this does NOT
+    mix in `TenantContainer`. Nothing in `myorg.example` knows what a scenario
+    is, so nothing here has to open one — the utterance below carries a
+    scenario id it invented itself and that is enough. That is the clearest
+    demonstration available that opening a scenario is a tenancy chore rather
+    than part of this component; see docs/tenancy.md.
     """
 
     def __init__(self, bus):

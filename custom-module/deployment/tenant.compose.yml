@@ -1,0 +1,62 @@
+# ONE TENANT of the deployment. Run it once per tenant, with a different
+# CLTL_TENANT and a different CLTL_CHATUI_PORT each time:
+#
+#   CLTL_TENANT=tenant-a CLTL_CHATUI_PORT=8000 \
+#       docker compose -f deployment/tenant.compose.yml up -d
+#   CLTL_TENANT=tenant-b CLTL_CHATUI_PORT=8001 \
+#       docker compose -f deployment/tenant.compose.yml up -d
+#
+# Bring deployment/server.compose.yml up FIRST — this half joins the network
+# that one creates, and compose refuses to start otherwise ("network
+# cltl-example declared as external, but could not be found"). Tear this half
+# down BEFORE the server, for the same reason.
+#
+# What makes this a tenant is CLTL_TENANT and nothing else. The configuration
+# under ./config/tenant is byte-identical for every tenant; the tenant id
+# arrives from the environment and is interpolated when the value is read.
+#
+# The chat UI lives HERE rather than on the server because it publishes
+# utterances without source=, so an untenanted one would route to the bare
+# `cltl.topic.text_in` key, which no tenanted subscriber binds.
+#
+# The chat UI stays BLANK until something opens this tenant's scenario. Nothing
+# in this file does: there is no cltl-context anywhere in this deployment. That
+# job belongs to the custom side — the notebook (rung 1), attach/listen.py
+# (rung 2), or the module's own container (rung 4, compose/example.compose.yml).
+# See docs/tenancy.md.
+#
+# `name:` interpolates CLTL_TENANT and REQUIRES it: with the variable unset,
+# compose fails at interpolation before starting anything, rather than letting
+# the repo's most-documented failure mode — an unexpanded $CLTL_TENANT reaching
+# the bus as a literal string — happen quietly. `-p` still overrides it if you
+# need a different project name.
+
+name: cltl-example-tenant-${CLTL_TENANT:?set CLTL_TENANT to this tenant's id, e.g. tenant-a}
+
+services:
+  chatui:
+    image: ghcr.io/leolani/cltl-chat-ui:${CLTL_IMAGE_TAG:-latest}
+    restart: "no"
+    ports:
+      # Required, not defaulted: two tenants on one host must publish on
+      # different ports, and being told to pick one is better than discovering
+      # "port is already allocated" on the second `up`.
+      - "${CLTL_CHATUI_PORT:?set a distinct host port per tenant, e.g. 8000 for tenant-a and 8001 for tenant-b}:8000"
+    volumes:
+      - ./config/tenant:/cltl-chatui/config:ro
+    environment:
+      CLTL_AMQP_URL: amqp://leolani:leolani@rabbitmq:5672/
+      # What makes this stack a tenant. Assigned, never defaulted — see `name:`.
+      CLTL_TENANT: "${CLTL_TENANT:?set CLTL_TENANT to this tenant's id, e.g. tenant-a}"
+      CLTL_LOGGING_CONFIG: /cltl-chatui/config/logging.config
+    networks:
+      - cltl
+
+networks:
+  cltl:
+    # Created by deployment/server.compose.yml. Joining it rather than creating
+    # a second one is what makes `rabbitmq` resolve as a hostname here without
+    # any host.docker.internal indirection — and what makes it obvious that the
+    # tenants are NOT separated by the network.
+    name: cltl-example
+    external: true

@@ -32,6 +32,41 @@ scaffolding: your actual logic can be tested with no bus, no config, and no
 container. Everything that needs those lives in `service.py`, which is written
 once and rarely changes.
 
+### The second package, which has three files and is not yours
+
+`src/myorg/tenant/` sits beside it, and is deliberately **not** an example of
+the pattern above:
+
+```
+src/myorg/tenant/
+  scenario.py    # builds a Scenario — pure construction, no bus
+  service.py     # publishes ScenarioStarted on start, ScenarioStopped on stop
+  container.py   # dependency-injection wiring
+```
+
+There is **no `api.py`**, and the absence is the design statement.
+`myorg/example/api.py` exists because `EchoExample` is meant to be replaced;
+nothing in `myorg.tenant` is. A scenario is built exactly one way, and the whole
+package is meant to be **deleted** the day your deployment runs a `cltl-context`
+per tenant — an ABC would advertise a choice that does not exist.
+`tests/test_packaging.py` pins the absence so nobody "completes the pattern".
+
+It exists only because tenant separation requires it. See
+[`tenancy.md`](tenancy.md#why-this-module-opens-a-scenario-and-why-that-is-not-a-feature).
+
+### A service that publishes but never listens needs no `TopicWorker`
+
+`TenantService` has none, and that is correct rather than an oversight.
+`TopicWorker` is a subscribe-and-dispatch loop; a service that subscribes to
+nothing would gain a thread and — under kombu, where it publishes on
+`<topic_scenario>.<tenant>` — a queue bound to the very key it publishes on, so
+it would receive its own `ScenarioStarted` straight back.
+
+`InfraContainer` asks nothing more of a service than `start()` and `stop()`:
+`DIContainer.start`/`stop` are no-ops that `__enter__`/`__exit__` call, and
+there is no worker registry to register with. If your own module only ever
+publishes — on a timer, or from an HTTP endpoint — it does not need one either.
+
 ## `service.py`
 
 Three responsibilities, and they are worth reading in the source alongside this.
@@ -129,9 +164,39 @@ what makes everything start bottom-up and stop top-down.
 **Composed in one process, no broker** — `attach/inprocess.py`, runnable with
 `venv/bin/python attach/inprocess.py` after `make build`. It builds an
 application container from this one component and round-trips an event through
-it. Two ordering rules apply when you compose several: the event-bus override
-must be the **first** base class, and start order is the **reverse** of the
-bases tuple.
+it. Note that it composes `ExampleContainer` **alone**, without
+`TenantContainer`: nothing in `myorg.example` knows what a scenario is, so
+nothing there needs one opened.
+
+`src/main.py` composes both, and the order is load-bearing:
+
+```python
+class ApplicationContainer(TenantContainer, ExampleContainer):
+```
+
+Start order is the **reverse** of the bases tuple, so this runs
+`ExampleContainer.start()` — and therefore `example_service.start()` — before
+`tenant_service.start()`, and the scenario is announced last, once this
+process's own subscriber is up. `stop()` mirrors it: the scenario closes first,
+while the bus is still alive. Swap the bases and the scenario is announced to a
+component that has not yet subscribed. `tests/test_container.py` asserts this
+directly, by recording what was subscribed at the moment each scenario event
+arrived.
+
+The separate rule that **the event-bus override must be the first base** applies
+to a container synthesised with an *empty* class body — see
+`HarnessInfraContainer` in
+`integration/src/cltl_integration/runner/inprocess.py`, which explains why
+(`KombuEventBusContainer.event_bus` is a plain, non-`@singleton` property, so
+whichever base reaches it first through the MRO decides). `ApplicationContainer`
+defines `event_bus` in its own body, so it wins regardless of base order.
+
+One more process-global to know about: `@singleton` caches by the **bare method
+name** on `DIContainer` itself, for the whole process. That is why every
+accessor here is prefixed (`example_service`, `tenant_service`, never
+`service`), and why `tests/test_container.py` calls `DIContainer._reset()`
+between tests — without it, a second container gets the first one's services,
+still bound to the first one's bus.
 
 **Standalone against a real broker** — `python src/main.py`, with a
 `config/custom.config` pointing `[cltl.event]` at `kombu` and your deployment's
@@ -144,7 +209,10 @@ longer exists ([`gotchas.md`](gotchas.md)).
 `setup.py` uses `find_namespace_packages(include=['myorg.*'])` — `myorg.*`,
 never bare `myorg`. That leaves `myorg` a PEP 420 namespace package, so a
 second distribution of yours (`myorg.other_module`) can share the top-level
-namespace without either shadowing the other. Get this wrong and nothing breaks
+namespace without either shadowing the other. The `.*` is also why
+`myorg.tenant` is picked up with no change to `setup.py`: **one distribution,
+two packages**, which is unusual enough to be worth noticing but entirely
+normal. Get this wrong and nothing breaks
 until that second distribution exists, at which point the failure is very hard
 to read — so `tests/test_packaging.py` pins it both ways.
 

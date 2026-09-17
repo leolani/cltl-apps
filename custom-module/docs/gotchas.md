@@ -28,15 +28,6 @@ rather than raising — deliberate, since the management plugin may genuinely be
 absent, but it means the binding check quietly stopped checking. The symptom is
 the intermittent dropped first message above, not an error.
 
-### Only *this* module answers — ELIZA stays silent
-
-You have not answered "yes" to the opening question. `cltl-eliza` is gated on an
-intention that only becomes active once the consent handshake completes; this
-template has no such gating and answers immediately.
-
-Say "yes" once at the start and both answer from then on. See
-[`deployment.md`](deployment.md#say-yes-first).
-
 ### Two agents answer every message
 
 By design — see the [README](../README.md). Give `topic_output` a private topic
@@ -45,10 +36,71 @@ if you want your module to stop competing with `cltl-eliza`
 
 ### The chat UI is blank, or says there is no scenario
 
-Nothing renders until a conversation is open. `[cltl.context] start_scenario:
-true` makes the context service open one itself at startup. The platform's test
-harness leaves it `false` and opens one from the test process instead — a
-deployment with neither shows an empty chat UI forever.
+**Before you have opened one, this is correct.** This deployment runs no
+`cltl-context`; nothing in it opens a scenario, and a chat UI renders nothing
+until it has seen a `ScenarioStarted` on its own tenant's routing key. Run the
+notebook's scenario cell, `attach/listen.py`, or the module container.
+
+If it is *still* blank afterwards, the scenario went somewhere this chat UI is
+not listening. In order of likelihood:
+
+- **The tenants do not match.** The `TENANT` in the notebook, or `--tenant` on
+  `listen.py`, has to be the same string as the `CLTL_TENANT` the tenant stack
+  was started with. Check the bindings screen (below) — you will see the
+  scenario on one routing key and the chat UI bound to another.
+- **You opened it untenanted.** An untenanted publish lands on the bare
+  `cltl.topic.scenario` key, which no tenanted chat UI binds. `listen.py`
+  refuses this outright; a hand-written script will not.
+- **The publish beat the binding** (rung 4 only). See the next entry.
+
+### The chat UI returns `500 Internal Server Error` when you type
+
+Same cause as the blank UI, surfacing the other way round.
+`ChatUiService._create_payload` raises rather than publishing an utterance with
+no scenario id, and Flask turns that into a 500 with nothing useful in it. The
+real message is in the container log:
+
+```
+$ docker logs <tenant's chatui container> 2>&1 | grep -i "no active scenario"
+ValueError: No active scenario in chat UI for utterance %hello?
+```
+
+Open a scenario first.
+
+### The module container starts, but its tenant's chat UI never wakes up
+
+`[myorg.tenant] start_delay` lost the race. `KombuEventBus.subscribe` returns
+before RabbitMQ has bound the queue, so a `ScenarioStarted` published into that
+window is dropped by the exchange — silently, on both sides.
+
+Rungs 1–2 close this properly by polling the management API
+(`wait_until_bound(..., baseline={})`). **Rung 4 cannot**: `requests` is not in
+the base image, and `depends_on` does not reach across compose projects. So the
+container waits a flat `start_delay` seconds instead, and that is a guess.
+
+`docker compose -f compose/example.compose.yml restart example` fixes it for
+now; raising `start_delay` fixes it for good, and costs only startup latency.
+
+### Two scenarios for one tenant
+
+A listener and a module container both opened one. The chat UI ends up on
+whichever `ScenarioStarted` arrived last, and anything created before that
+carries the other id — harmless here, but it would split the conversation across
+two scenario directories in a deployment with persistence.
+
+Use `--no-scenario` on `listen.py`, or `[myorg.tenant] start_scenario: false` on
+the container. Nothing detects this for you, deliberately — see
+[`tenancy.md`](tenancy.md#two-openers-one-tenant).
+
+### One tenant sees another tenant's messages
+
+One of them came up untenanted, so it bound `<topic>.#` and matched everything.
+
+Go to <http://127.0.0.1:15672> → Exchanges → `cltl.combot` → Bindings. You want
+to see `cltl.topic.text_in.tenant-a`, `cltl.topic.text_in.tenant-b` and
+`cltl.topic.text_in.#` (the shared ELIZA's), and **no** bare
+`cltl.topic.text_in`. That screen is the entire isolation mechanism, visible —
+it is worth looking at once even when nothing is wrong.
 
 ### `attach/listen.py` will not die after the deployment stops
 
@@ -68,12 +120,35 @@ of your own must too. See [`attaching.md`](attaching.md).
 
 ## Configuration
 
+### `required variable CLTL_TENANT is missing a value`
+
+Not a bug — the guard working, at the earliest possible moment. The tenant and
+module compose files interpolate `CLTL_TENANT` into their project `name:` with
+`:?`, so an unset variable fails the `up` before a container starts. Set it to
+the tenant's id.
+
 ### `$CLTL_TENANT` (or any variable) reaching the bus as a literal string
 
 An unset variable interpolates to the literal `"$CLTL_TENANT"` with only a
 warning. The bus treats that as a real tenant name and binds a queue nothing
 will ever route to — no error, no traffic. Declare every interpolated variable
-in the environment, even when empty. See [`tenancy.md`](tenancy.md).
+in the environment, even when empty.
+
+This is now caught in two places — compose's `:?` above, and
+`TenantService.__init__`, which refuses an empty tenant, a literal `$…`, and
+anything that is not one lowercase routing-key word. If you hit it anyway, you
+are somewhere neither guard reaches: a hand-written script, or a config that
+interpolates some *other* variable. See [`tenancy.md`](tenancy.md).
+
+### `CLTL_TENANT=Tenant_A` and the halves do not talk
+
+`docker compose` lowercases an interpolated project `name:` but **not** the
+value it puts in the container environment. So the project is called
+`…tenant_a` while the tenant id stays `Tenant_A`, and two stacks that look
+identical bind different routing keys.
+
+`TenantService` rejects uppercase for exactly this reason. Use one lowercase
+word.
 
 ### `config/custom.config` left over from a previous run
 
@@ -87,7 +162,29 @@ single-process run silently try to reach a broker that no longer exists.
 Legacy topic names. See
 [`configuration.md`](configuration.md#the-legacy-names-trap).
 
+### `network cltl-example declared as external, but could not be found`
+
+The server half is not up. Tenants and module containers join the network the
+server creates; they do not create it themselves. Start
+`deployment/server.compose.yml` first, and tear it down last.
+
 ## Building the component (rungs 3–4)
+
+### There is no `makefile`
+
+`make build`, `make test` and `make docker-ghcr-build` are referenced throughout
+these docs, but this directory ships no `makefile` — those targets come from the
+platform's `util/` submodule and from being listed in `project_components` in
+`cltl-dev/makefile`. Rungs 3–4 therefore need this template placed inside a
+`cltl-dev` checkout, or that machinery added, before they work at all. Rungs 1–2
+are unaffected, and the unit tests can be run without any of it:
+
+```bash
+python3.10 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.notebook.txt pytest
+PYTHONPATH=.:src python -m pytest tests
+```
+
 
 ### `make build` succeeded but nothing actually built
 
@@ -106,6 +203,15 @@ venv/bin/pip list
 The first pass generates this component's dependency edges for the parent
 build; the second is the one that sees them. A property of the platform's build
 system, not of this template.
+
+### `ScenarioStopped` never arrives after `docker compose down`
+
+`docker compose down` and `docker stop` send SIGTERM, whose default disposition
+kills the process outright — so `with application:` never reaches its `__exit__`
+and the scenario is never closed. `src/main.py` installs a SIGTERM handler that
+raises `KeyboardInterrupt` so the shutdown unwinds like a `Ctrl-C`; a module
+that does not do the same will leave its tenant's chat UI holding a conversation
+whose owner is gone. (`cltl-context/src/main.py` has the identical latent bug.)
 
 ### `ValueError: could not set <name>`
 

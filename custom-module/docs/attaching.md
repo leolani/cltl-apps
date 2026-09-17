@@ -29,7 +29,7 @@ the whole trick, and it is why attaching needs no config files, no container
 and no install of this template. The platform's own test harness solves this
 problem the same way.
 
-## Three things that go wrong the first time
+## Four things that go wrong the first time
 
 **1. `TypeError: PAYLOAD is not a dataclass and cannot be turned into one`**
 
@@ -46,7 +46,25 @@ from the cause. `connect.register()` registers `'cltl-json'` before any bus is
 constructed — and `connect.event_bus()` calls it for you, so simply using that
 factory is enough.
 
-**3. The first message never arrives**
+**3. The chat UI is blank and stays blank**
+
+Nothing has opened a scenario, and in this deployment nothing will: there is no
+`cltl-context` in either half. `cltl-chat-ui` renders nothing and refuses to
+publish until it has seen a `ScenarioStarted` on its own tenant's routing key.
+
+So `connect.py` carries `start_scenario`/`stop_scenario`, and both the notebook
+and `listen.py` call them. **This is not something an attached module normally
+does** — it is a chore that falls to the custom side purely because the chat UI
+runs inside a tenant and a tenant's scenario can only be opened on that tenant's
+own bus. `docs/tenancy.md` is the long version; the short version is that it is
+a tenancy tax, not a feature.
+
+Those helpers are a deliberate copy of the platform's
+`integration/src/cltl_integration/drivers/scenario.py` and a parallel of this
+template's own `src/myorg/tenant/scenario.py`, rather than an import of either —
+rung 1 has nothing installed, which is the point of rung 1.
+
+**4. The first message never arrives**
 
 This one is worth understanding properly, because the symptom is
 *intermittent*.
@@ -60,6 +78,25 @@ side.
 
 `connect.wait_until_bound()` closes the window: it polls RabbitMQ's management
 API and waits for the number of queues bound to your topic to actually rise.
+
+### Two different questions, and `baseline=`
+
+The default behaviour answers **"is *my* subscription live"**: snapshot the
+counts, wait for them to rise by one.
+
+Opening a scenario needs the other question — **"is *anyone* bound yet"** —
+because the queue that has to exist belongs to the chat UI, not to you. Waiting
+for a rise would be answered by your own subscription. Passing `baseline={}`, an
+all-zero starting point, turns the increment check into a presence check:
+
+```python
+wait_until_bound(MANAGEMENT_URL, [TOPIC_SCENARIO], tenant=TENANT,
+                 amqp_url=AMQP_URL, baseline={})
+scenario = start_scenario(bus, TOPIC_SCENARIO)
+```
+
+Same trick, same reason, as `ComposeRunner.await_bindings(topics, {}, tenant)`
+in the platform's own harness.
 
 **Why counting, and not just checking?** The deployment's own modules are
 already subscribed to `cltl.topic.text_in` before you arrive. "Is anything
@@ -86,10 +123,37 @@ When it works, it says so, and it takes a fraction of a second. If you see it
 report a fallback sleep, check the management URL and credentials before
 believing anything else on this page.
 
+## Checking the isolation from a notebook
+
+The last section of `attach/example.ipynb` attaches two extra observers and
+tallies what each one receives: a tenanted bus for a *different* tenant, and an
+untenanted one that binds `<topic>.#` and therefore sees everybody.
+
+Two points of technique there, both reusable:
+
+- **No second stack is needed.** `event_bus(AMQP_URL, tenant="tenant-b")`
+  subscribes on `<topic>.tenant-b` whether or not any container is running for
+  tenant-b. Bindings do not care whether the tenant "exists"; a tenant is a word
+  in a routing key.
+- **The untenanted observer is a control, not decoration.** Subscribing as
+  another tenant and receiving nothing is exactly what you would also see with
+  the broker down, the chat UI unplugged, or nobody typing. The result worth
+  reporting is that the untenanted observer *did* see the conversation and the
+  other tenant did not. Same reasoning as `wait_until_bound` counting bindings
+  rather than checking for them.
+
+Both extra buses have to be closed along with the main one — see below.
+
 ## Closing the bus
 
-Always call `bus.close()` when you are done. `listen.py` does it in a `finally`;
-the notebook has a dedicated last cell.
+Close the scenario **first**, then the bus: closing a scenario is a publish, so
+the bus has to still be open for it. `listen.py` does both in a `finally`; the
+notebook has a dedicated last cell for both, and closes **every** bus it opened
+— the two isolation observers included, since each one holds consumer threads of
+its own.
+
+Closing the scenario also clears the chat UI's transcript, which is a convenient
+way to see it land rather than taking it on faith.
 
 `KombuEventBus`'s consumer threads retry a lost connection **forever** by
 design. A bus left open keeps trying for the life of the process, which is why
@@ -104,8 +168,21 @@ transform imported from `myorg.example.echo`, so rungs 2 and 3 demonstrably run
 identical logic.
 
 ```bash
-python attach/listen.py --amqp-url amqp://leolani:leolani@127.0.0.1:5672/
+python attach/listen.py --tenant tenant-a \
+    --amqp-url amqp://leolani:leolani@127.0.0.1:5672/ \
+    --management-url http://127.0.0.1:15672
 ```
 
-`--help` lists the rest: management URL, tenant, and the input and output
-topics. It runs until `Ctrl-C`.
+`--tenant` is **required and has no default**. There is no untenanted
+conversation to join, and a default would pick a tenant on your behalf. Passing
+`--tenant ''` attaches as a read-only observer of every tenant on the exchange,
+and is refused unless you also pass `--no-scenario` — an untenanted
+`ScenarioStarted` lands on the bare key and reaches nobody.
+
+`--no-scenario` is for when something else already opened this tenant's
+conversation: its own module container, or another listener. Two openers for one
+tenant leaves the chat UI on whichever arrived last.
+
+`--help` lists the rest: management URL, and the input, output and scenario
+topics. It runs until `Ctrl-C`, then closes the scenario before the bus — in a
+`finally`, so a crash does the same.

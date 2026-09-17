@@ -8,7 +8,20 @@ from cltl.combot.infra.config import Configuration, ConfigurationManager
 
 
 class DictConfiguration(Configuration):
-    """The `.get(key, multi=False)` / `key in config` surface, over a plain dict."""
+    """The `.get(key, multi=False)` / `key in config` surface, over a plain dict.
+
+    The typed accessors are implemented rather than inherited: `Configuration`
+    leaves them `NotImplementedError`, and the real `LocalConfiguration` gets
+    them from configparser. `TenantService.from_config` reads `start_scenario`
+    with `get_boolean` and `start_delay` with `get_float`, exactly as
+    `cltl-context/src/main.py` reads its own `start_scenario`, so a test double
+    that only answers `get()` would force the production code into a less
+    idiomatic shape to suit the test.
+    """
+
+    # configparser's own vocabulary — see Configuration.get_boolean's contract.
+    _TRUE = ("1", "yes", "true", "on")
+    _FALSE = ("0", "no", "false", "off")
 
     def __init__(self, values: Mapping[str, str]):
         self._values = dict(values)
@@ -17,6 +30,20 @@ class DictConfiguration(Configuration):
         if multi:
             return [v.strip() for v in self._values[key].split(",") if v.strip()]
         return self._values[key]
+
+    def get_int(self, key):
+        return int(self._values[key])
+
+    def get_float(self, key):
+        return float(self._values[key])
+
+    def get_boolean(self, key):
+        value = str(self._values[key]).strip().lower()
+        if value in self._TRUE:
+            return True
+        if value in self._FALSE:
+            return False
+        raise ValueError(f"Not a boolean: {self._values[key]!r}")
 
     def __contains__(self, key):
         return key in self._values

@@ -54,5 +54,67 @@ class ConnectHelperTest(unittest.TestCase):
         self.connect.register()
 
 
+class BindingKeyTest(unittest.TestCase):
+    """The routing rule the whole of docs/tenancy.md is about, as an assertion."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.connect = _load("connect")
+
+    def test_a_tenanted_subscriber_binds_exactly_its_own_tenant(self):
+        self.assertEqual("cltl.topic.scenario.tenant-a",
+                         self.connect.binding_key("cltl.topic.scenario", "tenant-a"))
+
+    def test_an_untenanted_subscriber_binds_every_tenant(self):
+        # `#` matches ZERO OR MORE words in RabbitMQ, so this matches every
+        # tenant's traffic AND the bare topic. That asymmetry is what lets one
+        # shared cltl-eliza serve every tenant.
+        self.assertEqual("cltl.topic.scenario.#",
+                         self.connect.binding_key("cltl.topic.scenario", ""))
+        self.assertEqual("cltl.topic.scenario.#",
+                         self.connect.binding_key("cltl.topic.scenario"))
+
+
+class ScenarioHelperTest(unittest.TestCase):
+    """connect.new_scenario is a deliberate COPY of myorg.tenant.scenario's.
+
+    Rungs 1-2 install nothing from this template, so the duplication has to
+    exist. Asserting the same shape in both places is what keeps the two copies
+    from drifting — see tests/test_scenario.py for the other one.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.connect = _load("connect")
+
+    def test_shape_matches_the_packaged_version(self):
+        from myorg.tenant import scenario as packaged
+
+        scenario = self.connect.new_scenario(agent="A", speaker="S", location="L")
+
+        self.assertEqual(packaged.AGENT_URI, self.connect.AGENT_URI)
+        self.assertEqual(packaged.SPEAKER_URI, self.connect.SPEAKER_URI)
+        self.assertEqual(packaged.SIGNALS, self.connect.SIGNALS)
+
+        self.assertEqual("A", scenario.context.agent.name)
+        self.assertEqual("S", scenario.context.speaker.name)
+        self.assertEqual("L", scenario.context.location)
+        self.assertIsNone(scenario.ruler.end)
+
+    def test_an_explicit_id_is_honoured(self):
+        self.assertEqual("s-1", self.connect.new_scenario("s-1").id)
+
+
+class WaitUntilBoundBaselineTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.connect = _load("connect")
+
+    def test_no_management_url_still_takes_the_flat_sleep_path(self):
+        # `baseline` must not disturb the documented fallback: with no
+        # management API there is nothing to ask, whichever question was meant.
+        self.connect.wait_until_bound(None, ["cltl.topic.scenario"], baseline={})
+
+
 if __name__ == "__main__":
     unittest.main()

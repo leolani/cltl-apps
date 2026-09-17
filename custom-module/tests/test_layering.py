@@ -11,6 +11,19 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent.parent / "src" / "myorg" / "example"
 FORBIDDEN_PREFIX = "cltl.combot.infra"
 
+TENANT_SRC = Path(__file__).resolve().parent.parent / "src" / "myorg" / "tenant"
+# A NARROWER rule for myorg/tenant/scenario.py, rather than a relaxation of the
+# blanket one above. That file is platform mechanics, not domain logic, so the
+# boundary its docstring actually claims is "no bus, no worker, no config, no
+# resource manager" — publishing lives in service.py. `timestamp_now`
+# (cltl.combot.infra.time_util) is the one deliberate exception: it is a clock,
+# and integration/src/cltl_integration/drivers/scenario.py imports it for the
+# same reason.
+FORBIDDEN_FOR_SCENARIO = ("cltl.combot.infra.event",
+                          "cltl.combot.infra.topic_worker",
+                          "cltl.combot.infra.config",
+                          "cltl.combot.infra.resource")
+
 
 def _imported_modules(path: Path):
     tree = ast.parse(path.read_text(), filename=str(path))
@@ -28,6 +41,20 @@ class LayeringTest(unittest.TestCase):
 
     def test_echo_has_no_infra_dependency(self):
         self._assert_no_infra_import(SRC / "echo.py")
+
+    def test_scenario_does_not_touch_the_bus(self):
+        path = TENANT_SRC / "scenario.py"
+        offending = [m for m in _imported_modules(path)
+                     if m.startswith(FORBIDDEN_FOR_SCENARIO)]
+        self.assertEqual([], offending,
+                         f"{path.name} imports {offending}; building a Scenario must "
+                         f"not require an EventBus — service.py is what publishes it.")
+
+    def test_scenario_may_read_the_clock(self):
+        # Pins the exception as an exception, so that widening it later is a
+        # visible edit rather than a quiet one.
+        self.assertIn("cltl.combot.infra.time_util",
+                      list(_imported_modules(TENANT_SRC / "scenario.py")))
 
     def _assert_no_infra_import(self, path: Path):
         offending = [m for m in _imported_modules(path) if m.startswith(FORBIDDEN_PREFIX)]

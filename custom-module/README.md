@@ -34,6 +34,24 @@ each other. They all talk to a **message bus**, publishing events on named
                         └─────────────────────┘
 ```
 
+The deployment you attach to is **multi-tenant**, which folds that picture in
+half. One shared platform serves several isolated groups of users; your module
+belongs to one of them:
+
+```
+   tenant-a                     shared server              tenant-b
+   ─────────────────────        ─────────────────          ─────────────────────
+   chat UI      :8000  ──────►  rabbitmq        ◄──────    chat UI      :8001
+   YOUR MODULE                  cltl-eliza                 YOUR MODULE
+     tenant: tenant-a             tenant: (none)             tenant: tenant-b
+```
+
+One broker, one exchange, one Docker network. The **only** thing keeping the
+two tenants apart is the routing key each one binds — `cltl.topic.text_in.tenant-a`
+against `cltl.topic.text_in.tenant-b`, while the shared ELIZA binds
+`cltl.topic.text_in.#` and hears both. [`docs/tenancy.md`](docs/tenancy.md) is
+the whole story.
+
 The consequence that matters: **nothing in the platform needs to know your
 module exists.** You subscribe to a topic that is already being published on,
 and publish to a topic that is already being listened to. No registration, no
@@ -80,17 +98,22 @@ source code: the deployment runs from public images on `ghcr.io/leolani`, which
 the first `docker compose up` pulls for you.
 
 ```bash
-# terminal 1 — a Leolani deployment: broker, chat UI, ELIZA, context/BDI
-docker compose -f deployment/deployment.compose.yml up
+# terminal 1 — the shared half: broker + one ELIZA for every tenant
+docker compose -f deployment/server.compose.yml up -d
 
-# terminal 2 — a notebook that attaches to it
+# ...and one tenant, with its own chat UI
+CLTL_TENANT=tenant-a CLTL_CHATUI_PORT=8000 \
+    docker compose -f deployment/tenant.compose.yml up -d
+
+# terminal 2 — a notebook that attaches to that tenant
 python3.10 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.notebook.txt jupyterlab
 jupyter lab attach/example.ipynb
 ```
 
-Then open the chat UI at <http://127.0.0.1:8000/chatui/static/chat.html> and
-**answer "yes"** to its opening question before typing anything else.
+Then open the chat UI at <http://127.0.0.1:8000/chatui/static/chat.html>. It is
+**blank**, and it stays blank until the notebook opens tenant-a's conversation a
+few cells in. That is not a fault — see below.
 
 Step by step, with what to expect at each point:
 [`docs/getting-started.md`](docs/getting-started.md).
@@ -104,17 +127,25 @@ attaching to a *real* deployment. This module's reply is the one tagged
 `(via myorg.example)`. [`docs/configuration.md`](docs/configuration.md) shows
 how to give it a private topic instead.
 
-**Until you say "yes", only *this* module answers.** The agent asks for consent
-before starting a conversation, and `cltl-eliza` stays silent until you give
-it. This template deliberately has no such gating, so it answers from the very
-first message. One reply to your first message is the handshake working, not a
-fault.
+**The chat UI is blank until something opens a scenario, and that something is
+you.** A chat UI renders nothing until a conversation has been opened for it. In
+a normal deployment `cltl-context` does that — but a *tenant's* conversation can
+only be opened on that tenant's own bus, and the shared half does not have one.
+So the job lands on the custom side.
+
+This is the one part of the template that is **not** an example of custom
+functionality, and it is kept in its own package, `myorg.tenant`, to say so.
+`myorg.example` — the part you actually replace — contains no reference to a
+scenario or a tenant. Delete `myorg.tenant` the day your deployment runs a
+`cltl-context` per tenant. [`docs/tenancy.md`](docs/tenancy.md) has the
+reasoning.
 
 ## What needs a platform checkout, and what doesn't
 
 - **Running a deployment to attach to** — nothing extra.
-  [`deployment/deployment.compose.yml`](deployment/deployment.compose.yml) is
-  self-contained and pulls published images. That is all rungs 1–2 need, and it
+  [`deployment/server.compose.yml`](deployment/server.compose.yml) and
+  [`deployment/tenant.compose.yml`](deployment/tenant.compose.yml) are
+  self-contained and pull published images. That is all rungs 1–2 need, and it
   is what a rung-4 container joins.
 - **Building this template** (rungs 3–4) — a `cltl-dev` checkout, with this
   repository inside it. `make build` and the `Dockerfile` both resolve the
@@ -139,7 +170,7 @@ Read in this order:
 | [`component.md`](docs/component.md) | Rung 3: the four-file module pattern |
 | [`docker.md`](docs/docker.md) | Rung 4: building an image and joining the deployment |
 | [`configuration.md`](docs/configuration.md) | Every setting, and which are yours to change |
-| [`tenancy.md`](docs/tenancy.md) | Running one bus for several isolated conversations |
+| [`tenancy.md`](docs/tenancy.md) | **Read this one.** What a tenant is, and why your code opens a scenario |
 | [`making-it-yours.md`](docs/making-it-yours.md) | The rename checklist |
 | [`gotchas.md`](docs/gotchas.md) | Symptom → cause. Check here first when stuck |
 

@@ -32,9 +32,11 @@ Three of those fields do real work for you:
 - **`scenario_id`** — which conversation this belongs to. A Leolani deployment
   groups everything by scenario; an event without one is orphaned, and the chat
   UI will not show it.
-- **`tenant`** — which isolated set of users this belongs to, on a deployment
-  serving several. Empty on a single-tenant deployment, which is the normal
-  case and the one this template ships. See [`tenancy.md`](tenancy.md).
+- **`tenant`** — which isolated set of users this belongs to. This template's
+  deployment serves several, so it is set on everything your module sees, and
+  the routing key it produces is the only thing keeping one tenant's
+  conversation out of another's. Empty means "every tenant", which is what the
+  shared `cltl-eliza` runs as. See [`tenancy.md`](tenancy.md).
 
 You rarely construct these yourself. `Event.for_payload(payload, source=event)`
 does it correctly, and the section below is about why that `source=` matters
@@ -48,7 +50,7 @@ Plain strings, and the platform's are namespaced `cltl.topic.*`:
 |---|---|
 | `cltl.topic.text_in` | what a person said |
 | `cltl.topic.text_out` | what the agent says back |
-| `cltl.topic.scenario` | a conversation opening or closing |
+| `cltl.topic.scenario` | a conversation opening or closing — published here by `myorg.tenant`, because this deployment has no `cltl-context`; see [`tenancy.md`](tenancy.md) |
 | `cltl.topic.image` | an image signal |
 | `cltl.topic.vad`, `cltl.topic.microphone` | audio pipeline internals |
 
@@ -93,9 +95,10 @@ event you are answering onto your answer. Leave it out and:
 
 - your reply has **no `scenario_id`**, so nothing that groups events by
   conversation will find it — including the chat UI, which will not display it;
-- your reply has **no `tenant`**, which on a multi-tenant deployment means it
-  is published to a routing key no subscriber is listening on. It reaches
-  nobody, silently.
+- your reply has **no `tenant`**, which on this deployment means it is published
+  to the bare routing key that no tenanted subscriber binds. It reaches nobody,
+  silently. Not hypothetical — every deployment in this repository is
+  multi-tenant.
 
 This is the single most common bug in a hand-written module — common enough
 that a shipped platform component has it in one of its branches. `_process` in
