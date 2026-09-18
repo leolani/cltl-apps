@@ -47,11 +47,36 @@ In a second terminal, from this repository:
 ```bash
 python3.10 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.notebook.txt jupyterlab
+python -m ipykernel install --user --name cltl-example \
+    --display-name "cltl-example (.venv)"
 ```
 
-This installs just two platform libraries — `cltl.combot` (the event bus) and
-`emissor` (the data representation). It does **not** install this template:
-rungs 1–2 attach from outside and need none of it.
+This installs three platform libraries — `cltl.combot` (the event bus),
+`emissor` (the data representation) and `cltl.backend` (one class, for fetching
+an uploaded image's pixels). It does **not** install this template: rungs 1–2
+attach from outside and need none of it.
+
+**That third command is not optional, and it is the one people skip.** The
+stock kernel a venv gets is named `python3` and its `kernel.json` runs
+
+```json
+["python", "-m", "ipykernel_launcher", "-f", "{connection_file}"]
+```
+
+— a **bare `python`**, resolved through `PATH` when the kernel starts, not the
+interpreter you installed into. The notebook asks for that generic `python3`
+kernel by name, so whichever Jupyter opens it supplies its own. Register the
+venv under a name of its own and the kernelspec records an **absolute path** to
+`.venv/bin/python` instead, which nothing can quietly substitute. Then pick
+**cltl-example (.venv)** from the kernel menu.
+
+If you open the notebook in VS Code rather than JupyterLab, the same thing
+applies through a different door: use the kernel picker at the top right and
+select `.venv`. VS Code will otherwise hand you whichever interpreter it last
+selected for the workspace.
+
+The symptom when this is wrong is specific and misleading — see
+[`gotchas.md`](gotchas.md#modulenotfounderror-no-module-named-cltlbackend-but-the-venv-has-it).
 
 ## 3. Run the notebook
 

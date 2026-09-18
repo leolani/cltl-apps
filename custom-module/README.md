@@ -129,8 +129,15 @@ CLTL_TENANT=tenant-a CLTL_CHATUI_PORT=8000 \
 # terminal 2 — a notebook that attaches to that tenant
 python3.10 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.notebook.txt jupyterlab
+python -m ipykernel install --user --name cltl-example \
+    --display-name "cltl-example (.venv)"
 jupyter lab attach/example.ipynb
 ```
+
+Pick **cltl-example (.venv)** from the kernel menu. A venv's stock `python3`
+kernel launches a bare `python` off `PATH` rather than the interpreter you
+installed into, which is how a notebook ends up importing from somewhere else
+entirely — [`docs/getting-started.md`](docs/getting-started.md) has the detail.
 
 Then open the chat UI at <http://127.0.0.1:8000/chatui/static/chat.html>. It is
 **blank**, and it stays blank until the notebook opens tenant-a's conversation a
@@ -179,10 +186,11 @@ reasoning.
   platform's own libraries offline from a local package registry that the
   published *images* do not carry.
 
-For rungs 1–2 the two platform libraries you need come from
-`requirements.notebook.txt`, straight from GitHub. That tracks a moving branch
-rather than a pinned release — the quick way in, not the way to build something
-you intend to keep working.
+For rungs 1–2 the three platform libraries you need come from
+`requirements.notebook.txt`, straight from GitHub — `cltl.combot`, `emissor`,
+and `cltl.backend` for one class that fetches an uploaded image's pixels. That
+tracks a moving branch rather than a pinned release — the quick way in, not the
+way to build something you intend to keep working.
 
 ## Documentation
 

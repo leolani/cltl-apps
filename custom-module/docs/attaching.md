@@ -29,7 +29,7 @@ the whole trick, and it is why attaching needs no config files, no container
 and no install of this template. The platform's own test harness solves this
 problem the same way.
 
-## Four things that go wrong the first time
+## Five things that go wrong the first time
 
 **1. `TypeError: PAYLOAD is not a dataclass and cannot be turned into one`**
 
@@ -145,6 +145,32 @@ When it works, it says so, and it takes a fraction of a second. If you see it
 report a fallback sleep, check the management URL and credentials before
 believing anything else on this page.
 
+**5. `ModuleNotFoundError` for a package the venv demonstrably has**
+
+The notebook is running on a different interpreter than the one you installed
+into, and nothing says so.
+
+A venv's stock kernel is called `python3` and its `kernel.json` launches a
+**bare `python`**, resolved through `PATH` when the kernel starts rather than
+pinned to the venv:
+
+```json
+["python", "-m", "ipykernel_launcher", "-f", "{connection_file}"]
+```
+
+`example.ipynb` asks for that generic `python3` by name, so whichever Jupyter
+opens it supplies its own. Ask the kernel what it is — `import sys;
+print(sys.executable)` — and give the venv a kernel of its own, which records an
+absolute path:
+
+```bash
+python -m ipykernel install --user --name cltl-example \
+    --display-name "cltl-example (.venv)"
+```
+
+In VS Code, the equivalent is the kernel picker at the top right. Full symptom
+and cure in [`gotchas.md`](gotchas.md#modulenotfounderror-no-module-named-cltlbackend-but-the-venv-has-it).
+
 ## Getting the pixels of an image
 
 `connect.load_image` is the fifth helper, and it exists because the surprise is
@@ -174,6 +200,11 @@ Three details it saves you from:
 `cltl.backend[impl]` is the third line of `requirements.notebook.txt` and the
 only one the text half does not need; the import is inside the function so the
 text cells keep working without it.
+
+**Which is also how you learn your notebook is not running in the venv.** See
+the fifth item above: `load_image` is usually the first cell that needs anything
+the *other* environment does not already have, so a kernel on the wrong
+interpreter fails precisely here and nowhere earlier.
 
 ## Checking the isolation from a notebook
 

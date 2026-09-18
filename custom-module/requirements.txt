@@ -1,9 +1,12 @@
 .[service]
 pytest
-# Not a dependency of the installed distribution — attach/connect.py (rungs
-# 1-2) uses it to poll RabbitMQ's management API, and tests/test_examples.py
-# imports that module directly. Listed here so `make build`'s venv can run
-# both the installed package and everything else in this repository.
+# Named here even though it now arrives anyway, as a dependency of
+# cltl.backend[impl] (see setup.py). What uses it DIRECTLY is attach/connect.py
+# (rungs 1-2), to poll RabbitMQ's management API, and tests/test_examples.py,
+# which imports that module — neither of which goes through the installed
+# distribution at all. Relying on a transitive dependency for a direct import is
+# how a venv breaks the day someone empties [myorg.example] topic_image and
+# drops cltl.backend with it.
 requests
 
 # The Docker image (Dockerfile, rung 4) uses requirements.docker.txt instead

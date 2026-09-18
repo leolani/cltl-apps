@@ -16,6 +16,52 @@ Use `connect.wait_until_bound()` — the notebook and `listen.py` both do — or
 inside a component, `topic_worker.start().wait()`, which means "subscribed" for
 the same reason. See [`attaching.md`](attaching.md).
 
+### `ModuleNotFoundError: No module named 'cltl.backend'`, but the venv has it
+
+The notebook is not running in the venv you installed into, and nothing says so.
+
+The giveaway is *where* it fails. Every cell up to the image section needs only
+`cltl.combot` and `emissor`, which another environment may well also have — so
+the notebook works perfectly until the first cell that calls `load_image`, and
+then fails on an import you can see is installed. Reinstalling the requirements
+changes nothing, because the requirements were never the problem.
+
+Ask the kernel which interpreter it is, from inside the notebook:
+
+```python
+import sys; print(sys.executable)
+```
+
+If that is not `.../.venv/bin/python`, the cause is almost always the stock
+kernelspec. A venv's default kernel is called `python3` and its `kernel.json`
+runs a **bare `python`**:
+
+```json
+["python", "-m", "ipykernel_launcher", "-f", "{connection_file}"]
+```
+
+resolved through `PATH` at kernel-start, *not* pinned to the venv. The notebook
+asks for `python3` by name, so whichever Jupyter opens it provides its own.
+
+Fix it by giving the venv a kernel of its own, which records an absolute path:
+
+```bash
+source .venv/bin/activate
+python -m ipykernel install --user --name cltl-example \
+    --display-name "cltl-example (.venv)"
+```
+
+then select **cltl-example (.venv)** from the kernel menu and re-run from the
+top. `jupyter kernelspec list` shows what is registered and where. In VS Code,
+use the kernel picker at the top right and choose `.venv` instead.
+
+As a one-off escape hatch, `%pip install -r ../requirements.notebook.txt` inside
+a cell installs into *the running kernel* whatever that turns out to be — which
+unblocks you, and leaves you running in an environment you did not choose.
+
+`load_image` raises this with the `sys.executable` of the kernel appended, so
+the answer is in the traceback itself.
+
 ### `wait_until_bound` raises `TimeoutError` for a key that IS bound
 
 You subscribed a second handler to a topic this bus was already subscribed to.

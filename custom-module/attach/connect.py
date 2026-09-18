@@ -387,6 +387,12 @@ def load_image(file_url: str, storage_url: str = DEFAULT_STORAGE_URL):
     `cltl.backend` is not installed (it is the third and least essential line in
     requirements.notebook.txt). Parallel to `ExampleService._storage_loader`,
     which is the installed version of the same three lines.
+
+    If that import fails on a notebook whose venv demonstrably HAS cltl.backend,
+    the kernel is not the venv — `import sys; sys.executable` says which
+    interpreter you are actually on, and docs/gotchas.md says what to do about
+    it. Every cell above this one works either way, which is what makes the
+    symptom so misleading.
     """
     from cltl.backend.source.client_source import ClientImageSource
 
