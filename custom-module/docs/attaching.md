@@ -206,6 +206,29 @@ the fifth item above: `load_image` is usually the first cell that needs anything
 the *other* environment does not already have, so a kernel on the wrong
 interpreter fails precisely here and nowhere earlier.
 
+## Seeing what actually crossed the wire
+
+`connect.event_json(event)` returns the JSON the broker carried, pretty-printed
+— `marshal(event, cls=Event)`, which *is* the function `register()` hands kombu
+as the `cltl-json` serializer. Not a `repr`, and not a reconstruction: what you
+read is the publisher's bytes with whitespace added.
+
+Two cells in the notebook show it, one per modality, and both are worth opening
+exactly once. The image one settles the claim this page makes twice over:
+`"array": null`, a `cltl-storage:` string in `files`, and a `ruler.bounds` that
+declares a size nothing has yet checked against the pixels. The text one is
+where you can see that `metadata.topic` ends in the tenant — the routing key a
+message arrived on is stamped onto the event, which is why `_process` can
+dispatch on it.
+
+**Folded, because a payload is sixty lines and a notebook is read top to
+bottom.** The notebook wraps the JSON in a plain HTML `<details>` block rather
+than setting `jupyter.outputs_hidden` in cell metadata: a collapsed *output* is
+each front-end's own notion, honoured by the one that wrote it and ignored by
+the next, while `<details>` is collapsed-by-default in JupyterLab, VS Code and
+nbviewer alike. The helper is in the setup cell, five lines, and escapes what it
+renders — a payload contains whatever somebody typed into the chat.
+
 ## Checking the isolation from a notebook
 
 The last section of `attach/example.ipynb` attaches two extra observers and

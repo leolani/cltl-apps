@@ -5,8 +5,8 @@ whole of what `KombuEventBus` actually asks for. Shared by the notebook
 (`example.ipynb`) and the script (`listen.py`), and quoted in
 `docs/attaching.md`, so there is exactly one definition to keep correct.
 
-The three functions below map onto the three things that go wrong the first
-time someone tries this:
+The functions below map onto the things that go wrong the first time someone
+tries this:
 
   1. `register()`      — without it, `marshal(event, cls=Event)` raises
                           `TypeError: PAYLOAD is not a dataclass`.
@@ -39,6 +39,7 @@ template's own src/myorg/tenant/scenario.py, rather than an import of either:
 rung 1 has nothing installed. Same reasoning as the echo transform duplicated in
 attach/listen.py — see docs/component.md.
 """
+import json
 import logging
 import threading
 import time
@@ -91,6 +92,23 @@ def _serializer(event: Event) -> str:
 def _deserializer(raw: str) -> Event:
     register_event_types()
     return unmarshal(raw, cls=Event)
+
+
+def event_json(event: Event, indent: int = 2) -> str:
+    """The JSON that actually crossed the broker for `event`, pretty-printed.
+
+    Not a reconstruction and not a `repr`: `marshal(event, cls=Event)` is the
+    very function `register()` hands kombu as the `cltl-json` serializer, so
+    this is the publisher's bytes with whitespace added. Reading it is the
+    fastest way to settle what a payload really contains — that an image
+    signal's `array` is `null`, that `files` holds a `cltl-storage:` reference,
+    that `metadata.topic` carries the tenant suffix the bus stamped on delivery.
+
+    A round trip through `json.loads` rather than `indent=` on the marshaller:
+    emissor's `marshal` takes no formatting options, and parsing what it
+    produced also proves it is JSON rather than something JSON-shaped.
+    """
+    return json.dumps(json.loads(_serializer(event)), indent=indent)
 
 
 class _DictConfiguration(Configuration):

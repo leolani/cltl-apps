@@ -54,6 +54,48 @@ class ConnectHelperTest(unittest.TestCase):
         self.connect.register()
 
 
+class EventJsonTest(unittest.TestCase):
+    """`event_json` is what example.ipynb folds into a <details> block.
+
+    It is only worth showing if it is genuinely the wire format: a reader opens
+    it to settle what a payload contains, and a pretty-printed `repr` dressed up
+    as JSON would answer that question wrongly.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.connect = _load("connect")
+
+    def _event(self):
+        from cltl.combot.event.emissor import TextSignalEvent
+        from cltl.combot.infra.event.api import Event
+        from emissor.representation.scenario import TextSignal
+
+        # Angle brackets because the notebook renders this inside HTML and has
+        # to escape it; a payload carries whatever somebody typed.
+        signal = TextSignal.for_scenario("s-1", 0, 1, None, "<hello>")
+
+        return Event.for_payload(TextSignalEvent.for_speaker(signal))
+
+    def test_it_is_the_serializer_kombu_was_given(self):
+        import json
+
+        event = self._event()
+
+        self.assertEqual(json.loads(self.connect._serializer(event)),
+                         json.loads(self.connect.event_json(event)))
+
+    def test_it_reaches_the_payload(self):
+        import json
+
+        parsed = json.loads(self.connect.event_json(self._event()))
+
+        self.assertEqual("<hello>", parsed["payload"]["signal"]["text"])
+
+    def test_it_is_indented_for_reading(self):
+        self.assertIn("\n  ", self.connect.event_json(self._event()))
+
+
 class BindingKeyTest(unittest.TestCase):
     """The routing rule the whole of docs/tenancy.md is about, as an assertion."""
 
