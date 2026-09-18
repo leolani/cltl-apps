@@ -98,6 +98,28 @@ scenario = start_scenario(bus, TOPIC_SCENARIO)
 Same trick, same reason, as `ComposeRunner.await_bindings(topics, {}, tenant)`
 in the platform's own harness.
 
+**Subscribe to everything you want, then wait once.** The snapshot is taken when
+`wait_until_bound` is *called*, so a second call made after the first returned
+would snapshot a world in which its own binding had already landed — its count
+could never rise past its own baseline, and it times out. `listen.py` subscribes
+to both its topics and then makes one call covering both; the notebook's
+isolation cell does one bus at a time for the same reason. The arrangement that
+looks tidier is the broken one, and it has already cost this repository once.
+
+**And only wait for a topic this bus has not subscribed to before.**
+`KombuEventBus` keeps one consumer per topic — one queue, one binding — so a
+second `subscribe` to a topic it is already consuming appends your handler to
+that consumer's list and creates no new queue
+([`kombu.py`](https://github.com/leolani/cltl-combot)'s `subscribe`). The count
+therefore cannot rise, and the call does not merely return early: it hangs for
+the whole timeout and then raises. The second handler is live as soon as
+`subscribe` returns.
+
+That is why the notebook's wire-up cell subscribes `respond` to two topics that
+`show` and `show_image` already bound, and then waits for *nothing*. Getting
+this wrong is a 30-second hang followed by a `TimeoutError` naming routing keys
+that are, in fact, bound — which reads like a broker problem and is not one.
+
 **Why counting, and not just checking?** The deployment's own modules are
 already subscribed to `cltl.topic.text_in` before you arrive. "Is anything
 bound to this topic" is answered *yes* by somebody else's queue. So
@@ -123,6 +145,36 @@ When it works, it says so, and it takes a fraction of a second. If you see it
 report a fallback sleep, check the management URL and credentials before
 believing anything else on this page.
 
+## Getting the pixels of an image
+
+`connect.load_image` is the fifth helper, and it exists because the surprise is
+worth meeting once at rung 1: an image signal does not contain an image.
+
+```python
+image = load_image(signal.files[0], DEFAULT_STORAGE_URL)
+height, width = image.shape[:2]          # numpy is (rows, cols)
+```
+
+`signal.files[0]` is `cltl-storage:image/<id>` — a scheme, not a URL.
+`ClientImageSource` resolves it against the storage address and decodes what
+comes back, which is JSON with the pixels base64-encoded rather than PNG bytes.
+Three details it saves you from:
+
+- It must be used as a **context manager**; `capture()` raises outside one.
+- `storage_url` **must end in a slash**. The reference is resolved with
+  `urljoin()`, which drops the last path segment of a base without one, so
+  `…:8002/storage` looks for `…:8002/image/<id>`. The packaged module appends
+  the slash and warns; `load_image` does not, on purpose — this is the rung where
+  you are meant to see the trap.
+- The fetch **can legitimately fail**. The chat UI's upload of the pixels is
+  best-effort and needs `cv2`, and it publishes the reference either way — so
+  wrap the call and carry on, as `listen.py` does. An unstored id answers HTTP
+  500 with a `KeyError`, not 404.
+
+`cltl.backend[impl]` is the third line of `requirements.notebook.txt` and the
+only one the text half does not need; the import is inside the function so the
+text cells keep working without it.
+
 ## Checking the isolation from a notebook
 
 The last section of `attach/example.ipynb` attaches two extra observers and
@@ -141,6 +193,10 @@ Two points of technique there, both reusable:
   reporting is that the untenanted observer *did* see the conversation and the
   other tenant did not. Same reasoning as `wait_until_bound` counting bindings
   rather than checking for them.
+- **It covers the image topic too**, so the claim is about both modalities. Note
+  what it does *not* cover: the pixels themselves. Those live in a shared,
+  untenanted store, and the routing key has no say over who can `GET` them —
+  see [`tenancy.md`](tenancy.md#anything-that-reads-the-bus-is-tenanted-storage-does-not).
 
 Both extra buses have to be closed along with the main one — see below.
 

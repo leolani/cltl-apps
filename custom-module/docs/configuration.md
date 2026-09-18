@@ -40,11 +40,13 @@ topic name from anywhere but configuration.
 
 | Key | Default | |
 |---|---|---|
-| `topic_input` | `cltl.topic.text_in` | the topic to subscribe to |
-| `topic_output` | `cltl.topic.text_out` | the topic to publish on |
+| `topic_input` | `cltl.topic.text_in` | the text topic to subscribe to |
+| `topic_output` | `cltl.topic.text_out` | the topic to publish on — both modalities answer here |
+| `topic_image` | `cltl.topic.image` | the image topic to subscribe to, or empty for text-only |
+| `image_storage_url` | `$CLTL_STORAGE_URL` | where an image signal's `cltl-storage:` reference resolves |
 
-Both are mandatory: an empty value raises at construction rather than silently
-subscribing to nothing.
+`topic_input` and `topic_output` are mandatory: an empty value raises at
+construction rather than silently subscribing to nothing.
 
 **To stop competing with `cltl-eliza`**, point `topic_output` at a topic of your
 own — say `myorg.topic.example_out`. Your replies then stop appearing in the
@@ -55,6 +57,27 @@ voice in the conversation.
 Do not point `topic_output` at `topic_input`. That is a feedback loop that
 saturates the broker in seconds; `echo.py`'s loop guard is what makes it merely
 noisy rather than fatal, and your own logic will not have one.
+
+`topic_image` and `image_storage_url` are the image half, and they travel
+together:
+
+| Key | What it does |
+|---|---|
+| `topic_image` | The topic image signals arrive on. **Empty turns the image half off entirely** — no subscription, and no `cltl.backend` import either. The platform's own idiom for "not in this deployment" |
+| `image_storage_url` | Where `cltl-storage:image/<id>` resolves. Required whenever `topic_image` is set |
+
+`image_storage_url` is checked at construction, with three outcomes, because an
+image store you cannot reach is invisible otherwise:
+
+| Value | Result |
+|---|---|
+| empty | `ValueError`. An image signal carries no pixels, so there is nothing to answer with |
+| `$CLTL_STORAGE_URL` | `ValueError` — an unexpanded variable; see [`$VAR` interpolation](#var-interpolation) below |
+| `…/storage` (no trailing slash) | **Normalised**, with a warning. The reference is resolved with `urljoin()`, which drops the last path segment of a base without a slash — but `eliza-server`'s own `custom.config` ships it that way, so refusing would make this module unusable against a stock deployment config |
+
+That last row is the one asymmetry worth remembering: this module *refuses* a
+missing address and *repairs* a malformed one, because only the first is
+unambiguously a mistake.
 
 ### `[myorg.tenant]` keys
 

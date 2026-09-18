@@ -25,6 +25,13 @@ time someone tries this:
                           This is NOT something a normal attached module does.
                           It is the price of running the chat UI inside a
                           tenant. See docs/tenancy.md.
+  5. `load_image()`      — an image signal carries no pixels. `signal.array` is
+                          always `None` on the bus; `signal.files[0]` is a
+                          `cltl-storage:image/<id>` reference, and turning that
+                          into pixels is a second HTTP hop against a service
+                          that answers in JSON-with-base64 rather than PNG
+                          bytes. "I subscribed to the image topic and the
+                          image was empty" is the report this one prevents.
 
 `new_scenario`/`start_scenario`/`stop_scenario` below are deliberately a copy of
 integration/src/cltl_integration/drivers/scenario.py and a parallel of this
@@ -198,6 +205,14 @@ def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
     integration/src/cltl_integration/runner/compose.py:446-513, which this is
     a single-runner-free reduction of.
 
+    **Only call this for a topic THIS bus is subscribing to for the first
+    time.** `KombuEventBus` keeps one consumer per topic — one queue, one
+    binding — and a second `subscribe` to a topic it is already consuming just
+    appends the handler to that consumer's list (`KombuEventBus.subscribe`). No
+    new queue is created, so the count cannot rise and this call can only ever
+    raise `TimeoutError` after the full timeout. The second handler is live the
+    moment `subscribe` returns; there is genuinely nothing to wait for.
+
     `baseline` chooses WHICH question is being asked, and there are two:
 
     * `None` (the default) snapshots the counts now and waits for them to RISE
@@ -333,3 +348,47 @@ def stop_scenario(event_bus: KombuEventBus, scenario_topic: str, scenario: Scena
     scenario.ruler.end = timestamp_now()
     event_bus.publish(scenario_topic,
                       Event.for_scenario_payload(scenario.id, ScenarioStopped.create(scenario)))
+
+
+# ---------------------------------------------------------------------------
+# Getting at the pixels.
+#
+# THIS one is ordinary custom functionality, unlike the scenario block above —
+# any module that cares about images does exactly this. It is separate only
+# because it is the second modality, and because the thing it does is
+# unobvious: the event does not carry the picture.
+# ---------------------------------------------------------------------------
+
+DEFAULT_STORAGE_URL = "http://127.0.0.1:8002/storage/"
+
+
+def load_image(file_url: str, storage_url: str = DEFAULT_STORAGE_URL):
+    """The pixels a signal's `files[0]` refers to, as a numpy array.
+
+    Shape is `(height, width, channels)` — rows first, RGB, `uint8`. An image
+    signal carries no pixels at all: `ImageSignal.for_scenario` hardcodes
+    `array=None`, and `files` holds one `cltl-storage:image/<id>` reference.
+
+    `storage_url` **must end in a slash.** The reference is resolved with
+    `urljoin(storage_url, "image/<id>")` inside cltl-backend's transport adapter
+    (`cltl/backend/source/client_source.py`), and `urljoin` drops the last path
+    segment of a base that does not end in one — so `…:8002/storage` looks for
+    `…:8002/image/<id>` and 404s from a URL that reads correctly in a log. The
+    installed module (`myorg/example/service.py`) appends the slash for you and
+    warns; here you get to see the trap, which is what rung 1 is for.
+
+    `ClientImageSource` is the platform's own client and is used rather than a
+    hand-rolled `requests.get` for two reasons: it resolves the `cltl-storage:`
+    scheme, and it decodes the wire format, which is JSON with the pixels
+    base64-encoded under an `{"__type": "np.ndarray", "shape": …}` envelope. It
+    also raises outside a `with` block, so the context manager is not optional.
+
+    Imported inside the function: rung 1's text cells must keep working when
+    `cltl.backend` is not installed (it is the third and least essential line in
+    requirements.notebook.txt). Parallel to `ExampleService._storage_loader`,
+    which is the installed version of the same three lines.
+    """
+    from cltl.backend.source.client_source import ClientImageSource
+
+    with ClientImageSource(file_url, storage_url) as source:
+        return source.capture().image

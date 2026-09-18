@@ -16,6 +16,18 @@ Use `connect.wait_until_bound()` — the notebook and `listen.py` both do — or
 inside a component, `topic_worker.start().wait()`, which means "subscribed" for
 the same reason. See [`attaching.md`](attaching.md).
 
+### `wait_until_bound` raises `TimeoutError` for a key that IS bound
+
+You subscribed a second handler to a topic this bus was already subscribed to.
+`KombuEventBus` keeps one consumer — one queue, one binding — per topic, and the
+second `subscribe` only appends your handler to that consumer's list. No new
+queue appears, so a check that waits for the count to *rise* can never pass, and
+the routing key it names in the error is bound already.
+
+Nothing is wrong and nothing needs waiting for: the handler went live when
+`subscribe` returned. Delete the call. Only the first subscription to a given
+topic on a given bus has a binding to wait for.
+
 ### `401 Unauthorized` from the management API, then a flat sleep
 
 `wait_until_bound` needs credentials for RabbitMQ's **management API**, which
@@ -33,6 +45,107 @@ the intermittent dropped first message above, not an error.
 By design — see the [README](../README.md). Give `topic_output` a private topic
 if you want your module to stop competing with `cltl-eliza`
 ([`configuration.md`](configuration.md)).
+
+### Only ONE agent answers an image
+
+Also by design, and it is the same fact from the other side. Submitting from the
+Image panel publishes an `ImageSignalEvent` on `cltl.topic.image` and **nothing**
+on the utterance topic, so `cltl-eliza` — which subscribes only to
+`cltl.topic.text_in` — never sees a picture. The single reply is yours.
+
+### You uploaded an image and nothing answered at all
+
+Three causes, in the order they actually occur.
+
+**The Image panel is not there.** `[cltl.chat-ui] image_upload` is `False`, or
+`external_input` is `False`. Ask the page what it thinks it has:
+
+```
+$ curl -s localhost:8000/chatui/config
+{"image_upload":true,"monitoring_url":null}
+```
+
+`image_upload: false` means the three image routes 404 and the tab is hidden.
+Note that `external_input: True` is *required* alongside it: with it off,
+`get_utterances` defaults its speaker filter to the agent's name and filters the
+uploaded image's own echo back out of the transcript.
+
+**The picture appears in the chat but no event is published.**
+`[cltl.chat-ui.events] topic_image` is empty. The chat UI logs
+`No image topic configured; annotations for <id> are not recorded` and echoes the
+image anyway — which is why the transcript looks fine and nothing downstream sees
+it.
+
+**The event is published and your module declines it.** Read your own log; this
+is the one case with a real diagnosis in it:
+
+```
+WARNING  Could not load the pixels for image signal <id> from
+         cltl-storage:image/<id>: ... Either they were never stored (the
+         publisher's upload is best-effort and needs cv2), or the storage
+         service is not running, or [myorg.example] image_storage_url points
+         somewhere else.
+```
+
+`myorg.example` publishes nothing rather than an error bubble — the
+`None`-means-say-nothing contract ([`concepts.md`](concepts.md)) — so the log is
+the only signal. Check the reference by hand:
+
+```
+$ curl -s localhost:8002/storage/image/<id> | head -c 80
+{"depth":null,"image":{"__type":"np.ndarray","data":"...
+```
+
+### `KeyError: No image with id … found in the storage`, as an HTTP 500
+
+The reference resolved and the pixels are not there. Note the status code: an
+unstored id is a **500** with a `KeyError` in the storage container's log, not a
+404, so "500" here does not mean the store is broken.
+
+Two ways to arrive:
+
+- **The chat UI could not decode the upload.** Its pixel PUT needs `cv2`, which
+  it imports lazily and declares nowhere (two differently-named distributions
+  provide it). Without it the PUT is skipped, the signal is published anyway, and
+  the reference dangles. `docker logs <chatui> | grep -i cv2`.
+- **The storage directory does not exist.** `CachedImageStorage` creates the
+  *parent* of `image_storage_path`, not the path itself, and `cv2.imwrite` into a
+  missing directory returns `False` instead of raising — so the PUT answers
+  `204 No Content` and the GET fails later. This is why
+  `deployment/storage/image/` is committed with a `.gitkeep`; if you moved or
+  cleaned it, `mkdir -p` it back.
+
+### Every image fetch 404s, and the URL in the log looks right
+
+Count the slashes. `cltl-storage:image/<id>` is resolved with
+`urljoin(storage_url, "image/<id>")`, and `urljoin` **drops the last path
+segment** of a base that does not end in `/`:
+
+```python
+urljoin("http://storage:8000/storage",  "image/x")  # -> .../image/x      wrong
+urljoin("http://storage:8000/storage/", "image/x")  # -> .../storage/image/x
+```
+
+`myorg.example` appends the slash for you and logs a warning saying so;
+`attach/connect.py` does not, deliberately, and `[cltl.backend] storage_url` for
+cltl-monitoring and the chat UI does not either.
+
+### The Monitoring tab is missing, or its iframe will not load
+
+**Missing** is the default. `ghcr.io/leolani/cltl-monitoring` is not a published
+package, so the service is behind a compose profile and
+`CLTL_MONITORING_URL` is empty — which makes the chat UI leave the tab out
+rather than show one that cannot load. See
+[`deployment.md`](deployment.md#the-monitoring-tab-is-opt-in).
+
+**Present but empty** is usually `[cltl.monitoring] active_interval`. At the
+shipped default of 15 a scenario stops being recorded after fifteen seconds
+without a request, and an image submitted during that gap is dropped on arrival
+with no replay. This deployment sets it to `0`.
+
+**Present but unreachable** means `CLTL_MONITORING_URL` names something the
+*browser* cannot resolve — `monitoring:8000` is a compose service name, not an
+address. It has to be `127.0.0.1` and the published port.
 
 ### The chat UI is blank, or says there is no scenario
 
@@ -167,6 +280,20 @@ Legacy topic names. See
 The server half is not up. Tenants and module containers join the network the
 server creates; they do not create it themselves. Start
 `deployment/server.compose.yml` first, and tear it down last.
+
+### `[myorg.example] image_storage_url is '$CLTL_STORAGE_URL' — an UNEXPANDED variable`
+
+The guard working. `CLTL_STORAGE_URL` is not defined in the container
+environment, and `EnvInterpolation` passes an undefined variable through
+verbatim with only a warning — so without this refusal the literal string would
+have been used as a URL and every fetch would have failed with a confusing
+error. `compose/example.compose.yml` defines it; a hand-rolled `docker run` has
+to as well. Running `python src/main.py` by hand needs it too — see
+`config/custom.config.example`.
+
+The sibling message, `image_storage_url is empty while topic_image is set`, is
+the same guard for the other omission. Either set the address, or empty
+`[myorg.example] topic_image` to run text-only.
 
 ## Building the component (rungs 3–4)
 

@@ -1,6 +1,8 @@
 import abc
 from typing import Optional
 
+import numpy as np
+
 
 class Example(abc.ABC):
     """The one thing this component does to an incoming utterance.
@@ -21,5 +23,36 @@ class Example(abc.ABC):
         no opinion about an utterance should stay silent rather than publish
         an empty reply — the chat UI would render it as a blank bubble, and
         cltl-emissor-data would persist it.
+        """
+        raise NotImplementedError()
+
+
+class ImageExample(abc.ABC):
+    """The one thing this component does to an incoming image.
+
+    A second interface rather than a second method on :class:`Example`, because
+    the two are replaced independently: a module that answers text and a module
+    that looks at pictures are different jobs, and `Example`'s docstring above
+    promises "a string in, a string or None out". Both are wired by the same
+    `ExampleService`, which dispatches on the topic an event arrived on.
+    """
+
+    @abc.abstractmethod
+    def describe(self, image: np.ndarray) -> Optional[str]:
+        """What to say about an image, or None to say nothing.
+
+        `image` is the pixels themselves: a numpy array of shape
+        `(height, width, channels)`, RGB, `uint8` — note rows first, which is
+        the one thing in this file worth getting right on the first try.
+
+        A numpy array, deliberately, and NOT `cltl.backend.api.camera.Image`,
+        which is what the platform's own storage client hands back. numpy is a
+        *data* type; `cltl.backend`'s `Image` belongs to a service, and an
+        implementation of this interface has no business knowing that the
+        pixels arrived over HTTP from anywhere in particular. That boundary is
+        what keeps tests/test_imagesize.py four assertions with no scaffolding,
+        and it is enforced by tests/test_layering.py.
+
+        Same `None` contract as `Example.process`, for the same two reasons.
         """
         raise NotImplementedError()

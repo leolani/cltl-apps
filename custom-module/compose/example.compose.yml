@@ -39,14 +39,25 @@ services:
       # own compose network, not the 127.0.0.1:<published-port> URL a process
       # outside that network uses (see attach/connect.py for that one).
       CLTL_AMQP_URL: ${CLTL_AMQP_URL:-amqp://leolani:leolani@rabbitmq:5672/}
+      # Where `cltl-storage:image/<id>` resolves. REAL, not a placeholder: this
+      # module fetches the pixels of every image signal it sees, and
+      # [myorg.example] image_storage_url refuses an empty or unexpanded value.
+      # Container-side view of the server's storage service, and the trailing
+      # slash is load-bearing — the reference is resolved with urljoin(), which
+      # drops the last path segment of a base without one.
+      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:-http://storage:8000/storage/}
       # $VAR interpolation happens at config READ time. Every variable the
       # deployment's custom.config might interpolate has to be defined here,
       # even empty — an unset one is passed through as the literal string and
       # only warned about, never failed on. Same list, same reason, as
-      # x-cltl-env in integration/compose/docker-compose.yml.
-      CLTL_STORAGE_URL: ""
+      # x-cltl-env in integration/compose/docker-compose.yml. These two are
+      # genuinely unused here: no microphone, no loudspeaker.
       CLTL_AUDIO_URL: ""
       CLTL_TTS_URL: ""
+      # Read by the tenant config's [cltl.chat-ui] monitoring_url, which this
+      # container does not use — but the file is mounted whole, and an undefined
+      # variable in a section nobody reads is still a warning per read.
+      CLTL_MONITORING_URL: ""
       # REQUIRED, not defaulted like the three above. This module opens its
       # tenant's scenario, and an untenanted publish lands on a bare routing
       # key that no tenanted chat UI binds — so an empty value here would leave

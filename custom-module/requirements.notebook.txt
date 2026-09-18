@@ -15,5 +15,12 @@
 # the root of a cltl-dev checkout). A newer interpreter may warn or fail here.
 git+https://github.com/leolani/emissor.git@ref_scenarios
 cltl.combot[external] @ git+https://github.com/leolani/cltl-combot.git@ref_scenarios
+# For one class, ClientImageSource — the platform's client for the image
+# storage service, which resolves a signal's `cltl-storage:image/<id>`
+# reference and decodes the pixels. attach/connect.py's `load_image` is a
+# three-line wrapper around it. Drop this line and the image cells of
+# attach/example.ipynb (and `--no-images` in attach/listen.py) are all you lose;
+# the text half needs nothing from it.
+cltl.backend[impl] @ git+https://github.com/leolani/cltl-backend.git@ref_scenarios
 requests
 kombu

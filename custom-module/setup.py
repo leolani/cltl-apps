@@ -28,7 +28,18 @@ setup(
     # resolution is entirely positional against whatever sdist currently sits in
     # cltl-requirements/leolani/, selected by `--pre --upgrade --upgrade-strategy
     # eager --no-index` (see makefile / util/make/makefile.py.base.mk).
-    install_requires=['cltl.combot', 'emissor'],
+    #
+    # cltl.backend[impl] is here for ONE class: ClientImageSource, which
+    # resolves the `cltl-storage:image/<id>` reference an image signal carries
+    # and decodes the pixels out of the storage service's JSON-with-base64 wire
+    # format (see myorg/example/service.py). The `impl` extra adds only mock,
+    # requests and parameterized on top of cltl.backend's own numpy — all pure
+    # Python, and all but `requests` already preinstalled in the cltl-base
+    # image; see docs/docker.md for the caveat about that one. A module that
+    # leaves [myorg.example] topic_image empty never imports any of it, but the
+    # dependency is declared rather than optional because the shipped
+    # configuration DOES use the image path.
+    install_requires=['cltl.combot', 'emissor', 'cltl.backend[impl]'],
     extras_require={
         "service": [
             # cltl.combot.infra.container imports the kombu event bus at module

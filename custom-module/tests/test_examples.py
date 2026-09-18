@@ -105,6 +105,51 @@ class ScenarioHelperTest(unittest.TestCase):
         self.assertEqual("s-1", self.connect.new_scenario("s-1").id)
 
 
+class ImageHelperTest(unittest.TestCase):
+    """attach/'s image code is a deliberate COPY of the packaged version's.
+
+    Two copies, for the same reason `transform`/`EchoExample` are two copies:
+    rungs 1-2 install nothing. These assertions are what keep them from
+    drifting.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.connect = _load("connect")
+        cls.listen = _load("listen")
+
+    def test_load_image_documents_the_trailing_slash(self):
+        # The whole trap, in the one place a reader of rung 1 will meet it:
+        # urljoin() drops the last path segment of a base without a slash, so
+        # `.../storage` looks for `.../image/<id>` and 404s from a URL that
+        # reads correctly in a log.
+        doc = self.connect.load_image.__doc__
+        self.assertIn("urljoin", doc)
+        self.assertIn("must end in a slash", doc)
+
+    def test_the_default_storage_url_has_one(self):
+        self.assertTrue(self.connect.DEFAULT_STORAGE_URL.endswith("/"))
+
+    def test_describe_image_agrees_with_the_packaged_placeholder(self):
+        import numpy as np
+
+        from myorg.example.imagesize import ImageSizeExample
+
+        # Non-square, so that a swapped width and height is visible.
+        image = np.zeros((48, 64, 3), dtype=np.uint8)
+
+        self.assertIn("64x48", self.listen.describe_image(image))
+        self.assertEqual(ImageSizeExample().describe(image).replace(
+            "myorg.example", "attach/listen.py"),
+            self.listen.describe_image(image))
+
+    def test_describe_image_declines_the_same_inputs(self):
+        import numpy as np
+
+        self.assertIsNone(self.listen.describe_image(None))
+        self.assertIsNone(self.listen.describe_image(np.zeros((0, 0, 3), dtype=np.uint8)))
+
+
 class WaitUntilBoundBaselineTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

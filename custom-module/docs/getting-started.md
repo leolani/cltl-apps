@@ -80,9 +80,22 @@ What you should see, in order:
    notebook that the agent knows nothing about.
 4. **Your reply, in the chat UI.** Publish a `TextSignalEvent` on
    `cltl.topic.text_out` and it appears in the conversation.
-5. **The two wired together** — the notebook answering automatically, alongside
-   ELIZA. Two replies per message from here on; see the README.
-6. **The isolation, checked rather than asserted.** The notebook's last section
+5. **A picture answered.** Open the **Image** panel beside the conversation,
+   choose a file, press Submit. An `ImageSignalEvent` arrives — and the notebook
+   prints the thing worth noticing: `signal.array` is `None` and
+   `signal.files` holds `cltl-storage:image/<id>`. The pixels are not in the
+   event. The next cell fetches them, and answers with the size it measured
+   rather than the size the signal declared.
+
+   You get **one** reply to that, not two. Submitting publishes an image signal
+   and no utterance, so ELIZA never sees it — which is a cleaner demonstration
+   of "subscribe to what you care about" than any amount of prose.
+6. **Both modalities wired up**, answering automatically for as long as the
+   kernel runs — one handler, dispatching on the topic the bus stamped on
+   delivery. Type, and get two replies; submit a picture, and get one. That cell
+   is `attach/listen.py`'s `handler` with `print` where the script has a log
+   line, which is the whole of the distance between rung 1 and rung 2.
+7. **The isolation, checked rather than asserted.** The notebook's last section
    attaches two more observers — one as `tenant-b`, one untenanted — and tallies
    what each receives while you type in tenant-a's chat UI. The untenanted one
    sees the whole conversation; tenant-b sees nothing, on the same broker, the
@@ -95,6 +108,9 @@ What you should see, in order:
    the untenanted observer is a **control**: "tenant-b saw nothing" would be
    equally true with the broker down or with you not typing, so the result that
    means something is the pair.
+
+   It covers the image topic too, so submit one more picture while it is
+   running.
 
 The last cell closes the scenario and then the bus. Run it. Closing the scenario
 clears the chat UI's transcript, which is how you see it land; and a
@@ -116,8 +132,10 @@ more durably:
   deployment rather than attached from outside. This one needs a `cltl-dev`
   checkout, because it *builds* the template instead of talking to a
   deployment. See [`component.md`](component.md).
-- **Replace the logic** — `src/myorg/example/echo.py` is one function. Change
-  what it returns and rerun; rungs 1 and 2 both use it.
+- **Replace the logic** — `src/myorg/example/echo.py` and
+  `src/myorg/example/imagesize.py` are one function each. Change what they
+  return and rerun; rungs 1 and 2 carry their own copies of both, deliberately,
+  and [`component.md`](component.md) says why.
 
 ## If something goes wrong
 

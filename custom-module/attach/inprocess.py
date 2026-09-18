@@ -7,25 +7,37 @@ whole deployment, reduced to exactly one module. Run after `make build`:
 
     venv/bin/python attach/inprocess.py
 
-Prints the reply this template's own ExampleService produces for a hand-built
-utterance, then shuts the container down cleanly. This is
-`tests/test_container.py` with `print` instead of `assert` — see that file for
-the same recipe under test.
+Prints the replies this template's own ExampleService produces for a hand-built
+utterance and a hand-built image signal, then shuts the container down cleanly.
+This is `tests/test_container.py` with `print` instead of `assert` — see that
+file for the same recipe under test.
+
+The image half runs here with **no storage service and no HTTP at all**, which
+is the whole payoff of `ExampleService` taking its image loader as an argument:
+the fake below is one lambda. `ClientImageSource` would need a real endpoint
+answering in the platform's JSON-with-base64 wire format; a test or a demo needs
+the pixels, not the round trip.
 """
 from queue import Queue
 
-from cltl.combot.infra.container import InfraContainer
-from cltl.combot.infra.di_container import singleton
+import numpy as np
+from cltl.combot.event.emissor import ImageSignalEvent, TextSignalEvent
 from cltl.combot.infra.event import Event
 from cltl.combot.infra.event.memory import SynchronousEventBus
 from cltl.combot.infra.time_util import timestamp_now
-from cltl.combot.event.emissor import TextSignalEvent
-from emissor.representation.scenario import TextSignal
+from emissor.representation.scenario import ImageSignal, TextSignal
 
 from myorg.example.container import ExampleContainer
 
 INPUT_TOPIC = "cltl.topic.text_in"
 OUTPUT_TOPIC = "cltl.topic.text_out"
+IMAGE_TOPIC = "cltl.topic.image"
+
+SCENARIO_ID = "scenario-demo"
+# 64 wide, 48 high — deliberately not square, so that a reply saying "48x64"
+# would be visibly wrong rather than accidentally right. numpy is (rows, cols).
+WIDTH, HEIGHT = 64, 48
+IMAGE_URL = "cltl-storage:image/image-demo"
 
 
 class _DictConfiguration:
@@ -59,8 +71,8 @@ class ApplicationContainer(ExampleContainer):
 
     `ExampleContainer` alone, deliberately: unlike `src/main.py` this does NOT
     mix in `TenantContainer`. Nothing in `myorg.example` knows what a scenario
-    is, so nothing here has to open one — the utterance below carries a
-    scenario id it invented itself and that is enough. That is the clearest
+    is, so nothing here has to open one — the signals below carry a scenario id
+    they invented themselves and that is enough. That is the clearest
     demonstration available that opening a scenario is a tenancy chore rather
     than part of this component; see docs/tenancy.md.
     """
@@ -71,13 +83,36 @@ class ApplicationContainer(ExampleContainer):
     @property
     def config_manager(self):
         return _DictConfigurationManager({
-            "myorg.example": {"topic_input": INPUT_TOPIC, "topic_output": OUTPUT_TOPIC},
+            "myorg.example": {
+                "topic_input": INPUT_TOPIC,
+                "topic_output": OUTPUT_TOPIC,
+                "topic_image": IMAGE_TOPIC,
+                # Never dialled: the loader built from it is replaced below,
+                # before anything starts. It still has to be non-empty and
+                # expanded, because `from_config` refuses both — which is
+                # itself worth seeing from here.
+                "image_storage_url": "http://localhost:8002/storage/",
+            },
             "cltl.event": {"implementation": "internal"},
         })
 
     @property
     def event_bus(self):
         return self._bus
+
+
+def _image_signal():
+    """An ImageSignal shaped exactly as cltl-chat-ui publishes one.
+
+    The pixels are NOT in it — `ImageSignal.for_scenario` hardcodes
+    `array=None`, and `files` carries a `cltl-storage:` reference instead. The
+    size is declared twice over: in `ruler.bounds` here, and in the shape of
+    whatever the reference resolves to. `ExampleService` answers with the
+    second and warns when they disagree.
+    """
+    return ImageSignal.for_scenario(SCENARIO_ID, timestamp_now(), timestamp_now(),
+                                    IMAGE_URL, (0, 0, WIDTH, HEIGHT),
+                                    signal_id="image-demo")
 
 
 def main():
@@ -87,11 +122,20 @@ def main():
 
     application = ApplicationContainer(bus)
     with application:
-        signal = TextSignal.for_scenario("scenario-demo", timestamp_now(), timestamp_now(), None, "hello there")
-        bus.publish(INPUT_TOPIC, Event.for_payload(TextSignalEvent.for_speaker(signal)))
+        # Swapped after construction, and before anything is published: the
+        # service holds the loader `from_config` built, and there is no storage
+        # service in this process to talk to. A deployment never does this; a
+        # demo and a test both do. tests/test_service.py uses the same seam.
+        application.example_service._image_loader = (
+            lambda url: np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8))
 
-        reply = replies.get(timeout=5)
-        print(reply.payload.signal.text)
+        signal = TextSignal.for_scenario(SCENARIO_ID, timestamp_now(), timestamp_now(), None, "hello there")
+        bus.publish(INPUT_TOPIC, Event.for_payload(TextSignalEvent.for_speaker(signal)))
+        print(replies.get(timeout=5).payload.signal.text)
+
+        bus.publish(IMAGE_TOPIC, Event.for_scenario_payload(
+            SCENARIO_ID, ImageSignalEvent.create(_image_signal())))
+        print(replies.get(timeout=5).payload.signal.text)
 
 
 if __name__ == "__main__":

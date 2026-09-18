@@ -46,8 +46,30 @@ would fail at startup with `ValueError: No configuration for myorg.example`.
 
 So this image carries its own `config/default.config`, with the canonical topic
 names already filled in, and a deployment only has to supply the **connection
-overlay** — which broker, which tenant. That asymmetry is the thing to
-understand before changing how the config is mounted.
+overlay** — which broker, which tenant, which image store. That asymmetry is the
+thing to understand before changing how the config is mounted.
+
+### `cltl.backend[impl]`, and the one packaging risk in it
+
+The image half of this module needs exactly one class from the platform's
+backend — `ClientImageSource` — so `setup.py` declares `cltl.backend[impl]`.
+That extra is `mock`, `requests` and `parameterized` on top of
+`cltl.backend`'s own `numpy`.
+
+`mock`, `parameterized` and `numpy` are in
+`cltl-requirements/requirements.base.txt` and are therefore preinstalled in the
+`cltl-base` image this `Dockerfile` builds on. **`requests` is not** — not
+directly. It arrives transitively, through six other packages in that file, so in
+practice `import requests` works; but the `Dockerfile`'s own comment asserts it
+is unavailable, and a `pip install --no-index` that has to *resolve* the name
+will only succeed if it is genuinely already satisfied.
+
+This is stated rather than solved: rungs 3–4 cannot be built from this checkout
+(no `makefile`, empty package registry — see
+[`gotchas.md`](gotchas.md#there-is-no-makefile)), so it has not been verified
+here. If the build fails resolving `requests`, add its sdist to the offline
+registry rather than vendoring an HTTP client — or empty `[myorg.example]`
+topic_image, which removes the dependency's only user.
 
 ## Joining one tenant of a running deployment
 

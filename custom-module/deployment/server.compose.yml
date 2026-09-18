@@ -9,6 +9,13 @@
 # publishes utterances without source= and an untenanted one would route to a
 # bare topic key that no tenanted subscriber binds.
 #
+# `storage` IS on this half, and it is the exception that proves the rule: it
+# subscribes to no topic at all, so it has no tenant dimension to get wrong.
+# The rule is "anything that reads the bus is tenanted" — storage does not, any
+# more than rabbitmq does. What follows from that is worth knowing: two tenants'
+# pixels sit in one store, separated only by the opaque uuid each image is filed
+# under. See docs/tenancy.md.
+#
 # `name:` pins the compose project so tearing this half down does not depend on
 # which directory it was run from. The network is given an explicit `name:` as
 # well, so that the tenants and rung-4 modules that join it as an EXTERNAL
@@ -50,6 +57,55 @@ services:
       timeout: 10s
       retries: 30
       start_period: 10s
+    networks:
+      - cltl
+
+  storage:
+    image: ghcr.io/leolani/cltl-backend:${CLTL_IMAGE_TAG:-latest}
+    # src/storage_main.py, NOT src/main.py. The default entry point is
+    # BackendContainer — microphone, camera and text-to-speech in one process,
+    # none of which exists here. src/storage_main.py is StorageContainer alone:
+    # the /storage HTTP endpoint and nothing else. It is also the only entry
+    # point that is safe on a SHARED bus: BackendContainer constructs
+    # EventLogService, which subscribes to `event_bus.topics` — and
+    # KombuEventBus.topics unions the topics it consumes with the
+    # tenant-suffixed routing keys it has produced on, so on this half it would
+    # subscribe to `cltl.topic.text_out.tenant-a` as though that were a topic
+    # name. cltl-dev/integration/config/topologies/multitenant_server.config
+    # records the same reasoning for leaving cltl-backend out altogether.
+    command: ["python", "src/storage_main.py"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: "no"
+    ports:
+      # 8002, not 8001: docs/deployment.md hands 8000 and 8001 to the two
+      # tenants' chat UIs. Published because rungs 1-2 run OUTSIDE this network
+      # and have to fetch pixels the same way a container does.
+      - "${CLTL_STORAGE_PORT:-8002}:8000"
+    volumes:
+      - ./config/server:/cltl-backend/config:ro
+      # Read-write, and the one bind mount in this deployment that is: this is
+      # where the pixels actually land. ./storage/image and ./storage/audio are
+      # committed (with .gitkeep) because CachedImageStorage does NOT create
+      # them — see the .gitkeep files.
+      - ./storage:/cltl-backend/storage
+    environment:
+      CLTL_AMQP_URL: amqp://leolani:leolani@rabbitmq:5672/
+      # Empty for the same reason eliza's is, even though StorageService never
+      # touches the bus: InfraContainer builds one anyway from
+      # [cltl.event.kombu] tenant: $CLTL_TENANT, and an UNDEFINED variable would
+      # arrive as the literal string "$CLTL_TENANT". An idle connection is
+      # harmless; a queue nobody routes to is confusing. The platform's own
+      # client/server-split server runs this same entry point the same way.
+      CLTL_TENANT: ""
+      CLTL_LOGGING_CONFIG: /cltl-backend/config/logging.config
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 3s
+      timeout: 10s
+      retries: 20
+      start_period: 5s
     networks:
       - cltl
 

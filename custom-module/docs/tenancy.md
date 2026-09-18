@@ -67,6 +67,35 @@ The platform's own harness does use one network per tenant plus
 (`integration/src/cltl_integration/runner/tenants.py`). That is the right shape
 when tenants run on different hosts, or when the broker port is ephemeral.
 
+## Anything that reads the bus is tenanted. Storage does not.
+
+That is the whole rule for deciding which half a service belongs to, and the
+image feature is what makes it concrete.
+
+`cltl-monitoring` **subscribes** — to the scenario, image and text topics — and
+keys its state by scenario id. One shared instance would bind `<topic>.#` and
+aggregate every tenant's conversation behind a single URL, so it runs once per
+tenant, on the tenant half, with its own `CLTL_TENANT`.
+
+`cltl-backend`'s storage service subscribes to nothing. `StorageContainer` is a
+Flask app in front of a directory; it builds an event bus only because
+`InfraContainer` does, and never publishes or consumes on it. It has no tenant
+dimension to get right, so it is shared infrastructure on the server half,
+exactly like the broker.
+
+**What that costs, stated plainly.** Two tenants' pixels sit in one store, and
+the only thing between tenant-a and tenant-b's picture is the uuid it is filed
+under. `GET /storage/image/<id>` asks for no tenant and checks none. A uuid is
+not a capability — it is unguessable, which is not the same as protected, and it
+travels in `signal.files` of every event on that tenant's image topic.
+
+This is the same cooperative-not-enforced property as the section above, one
+layer down, and it has the same answer: a deployment that needs enforcement
+needs per-tenant storage (a `cltl-backend` in `tenant.compose.yml`, each with its
+own `image_storage_path` and its own `storage_url`) or an authenticating proxy in
+front of the shared one. Neither is a Leolani problem. What this template owes
+you is that the limitation is *stated* rather than implied by a diagram.
+
 ## The chat UI has to run inside the tenant
 
 Not a preference — a consequence of row 4.

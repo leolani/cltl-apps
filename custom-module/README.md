@@ -16,15 +16,17 @@ each other. They all talk to a **message bus**, publishing events on named
 
 ```
                         ┌─────────────────────┐
-   you type ──────────► │      chat UI        │
-                        └──────────┬──────────┘
-                                   │ publishes on  cltl.topic.text_in
-                        ═══════════▼═══════════════════════════  the bus
+   you type ──────────► │      chat UI        │ ◄──── you upload a picture
+                        └────┬───────────┬────┘
+        publishes on         │           │    publishes on  cltl.topic.image
+        cltl.topic.text_in   │           │
+                        ═════▼═══════════▼═════════════════════  the bus
                                    │ delivers to every subscriber
                      ┌─────────────┴─────────────┐
                      ▼                           ▼
               ┌─────────────┐            ┌──────────────┐
               │  cltl-eliza │            │ YOUR MODULE  │  ◄── this template
+              │  (text only)│            │ text + image │
               └──────┬──────┘            └───────┬──────┘
                      │   publishes on  cltl.topic.text_out
                         ═══════════▼═══════════════════════════
@@ -44,6 +46,8 @@ belongs to one of them:
    chat UI      :8000  ──────►  rabbitmq        ◄──────    chat UI      :8001
    YOUR MODULE                  cltl-eliza                 YOUR MODULE
      tenant: tenant-a             tenant: (none)             tenant: tenant-b
+                                 storage   :8002
+                                   (no tenant at all)
 ```
 
 One broker, one exchange, one Docker network. The **only** thing keeping the
@@ -51,6 +55,13 @@ two tenants apart is the routing key each one binds — `cltl.topic.text_in.tena
 against `cltl.topic.text_in.tenant-b`, while the shared ELIZA binds
 `cltl.topic.text_in.#` and hears both. [`docs/tenancy.md`](docs/tenancy.md) is
 the whole story.
+
+`storage` is the exception that states the rule: it holds the pixels of uploaded
+images, subscribes to nothing, and so has no tenant. Anything that *reads the
+bus* is tenanted; a blob store is not, any more than the broker is — and two
+tenants' pictures therefore sit in one place, separated only by the uuid each is
+filed under. Said out loud in [`docs/tenancy.md`](docs/tenancy.md) rather than
+left to be inferred from this diagram.
 
 The consequence that matters: **nothing in the platform needs to know your
 module exists.** You subscribe to a topic that is already being published on,
@@ -61,17 +72,27 @@ and it is the whole reason it can be a separate repository.
 ## What this template is
 
 A complete, working module — buildable, testable, dockerisable — wrapped around
-one deliberately silly function:
+two deliberately silly functions, one per modality:
 
 ```python
-def process(self, text: str) -> Optional[str]:
+def process(self, text: str) -> Optional[str]:              # echo.py
     return f"YOU SAID: {text.upper()} (via myorg.example)"
+
+def describe(self, image: np.ndarray) -> Optional[str]:     # imagesize.py
+    height, width = image.shape[:2]
+    return f"The image you uploaded is {width}x{height} (via myorg.example)"
 ```
 
-That function is in `src/myorg/example/echo.py`, it is the *only* thing that is
-placeholder, and replacing it is the point. Everything around it — the event
-plumbing, the configuration, the tests, the Dockerfile — is real and is the
-part worth keeping.
+Those two functions, in `src/myorg/example/echo.py` and `imagesize.py`, are the
+*only* things that are placeholder, and replacing them is the point. Everything
+around them — the event plumbing, the configuration, the tests, the Dockerfile
+— is real and is the part worth keeping.
+
+The image one earns its keep by being unobvious in one specific way: **the
+event does not contain the image.** An image signal carries a
+`cltl-storage:image/<id>` reference, and fetching the pixels is a second HTTP
+hop. `service.py` does that and hands `describe` a plain numpy array, which is
+the shape a real implementation — a classifier — actually wants.
 
 ## Four ways to run it
 
@@ -80,7 +101,7 @@ gains you something and costs you something.
 
 | | You run | You get | You need |
 |---|---|---|---|
-| **1. Notebook** | `attach/example.ipynb` | See live events, publish a reply, poke at it interactively | Docker, Python |
+| **1. Notebook** | `attach/example.ipynb` | See live events, fetch an uploaded image, publish a reply, poke at it interactively | Docker, Python |
 | **2. Script** | `attach/listen.py` | The same thing, unattended | Docker, Python |
 | **3. Component** | `attach/inprocess.py`, `src/main.py` | A packaged, tested, installable module | + a `cltl-dev` checkout |
 | **4. Container** | `compose/example.compose.yml` | Runs inside the deployment like any platform module | + a `cltl-dev` checkout |
@@ -98,7 +119,7 @@ source code: the deployment runs from public images on `ghcr.io/leolani`, which
 the first `docker compose up` pulls for you.
 
 ```bash
-# terminal 1 — the shared half: broker + one ELIZA for every tenant
+# terminal 1 — the shared half: broker, one ELIZA for every tenant, image store
 docker compose -f deployment/server.compose.yml up -d
 
 # ...and one tenant, with its own chat UI
@@ -120,12 +141,18 @@ Step by step, with what to expect at each point:
 
 ## Two things that will confuse you first
 
-**Every message gets two replies.** This module subscribes to the same topic
-`cltl-eliza` does and publishes to the same topic — so both answer. That is
-deliberate: a module on its own private topic would prove nothing about
+**Every *typed* message gets two replies.** This module subscribes to the same
+topic `cltl-eliza` does and publishes to the same topic — so both answer. That
+is deliberate: a module on its own private topic would prove nothing about
 attaching to a *real* deployment. This module's reply is the one tagged
 `(via myorg.example)`. [`docs/configuration.md`](docs/configuration.md) shows
 how to give it a private topic instead.
+
+**An uploaded image gets one.** Submitting from the chat UI's Image panel
+publishes an image signal and *no* utterance, so `cltl-eliza` — which subscribes
+to `cltl.topic.text_in` and nothing else — never sees a picture. One modality,
+two answers; the other, one. Which is a shorter way of making the architecture's
+point than this paragraph is.
 
 **The chat UI is blank until something opens a scenario, and that something is
 you.** A chat UI renders nothing until a conversation has been opened for it. In

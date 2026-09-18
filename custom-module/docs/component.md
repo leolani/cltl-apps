@@ -13,24 +13,44 @@ make test
 
 ## The four files
 
-Every Leolani component, this one included, is four files:
+Every Leolani component is four files — an ABC, an implementation, a service and
+a container. This one has five, because it has two modalities; the count that
+matters is that there is still exactly **one** service and **one** container:
 
 ```
 src/myorg/example/
-  api.py         # the ABC — what your module does, as pure logic
-  echo.py        # the implementation — this is the placeholder to replace
+  api.py         # the ABCs — what your module does, as pure logic
+  echo.py        # the text placeholder to replace
+  imagesize.py   # the image placeholder to replace
   service.py     # the bus wiring: subscribe, process, publish
   container.py   # dependency-injection wiring
 ```
 
-The split that matters is the first one. **`api.py` and `echo.py` must never
-import anything from the platform's infrastructure** — no event bus, no worker,
-no configuration. `tests/test_layering.py` enforces it by parsing the imports.
+Five, because there are two modalities — but still **one** `service.py` and one
+`container.py`. `api.py` declares two ABCs, `Example` (a string in, a string or
+`None` out) and `ImageExample` (a numpy array in, a string or `None` out), and
+each has its own placeholder file. They are separate interfaces rather than two
+methods on one, because they are replaced independently: answering text and
+looking at pictures are different jobs, and a module that does only one should
+not have to stub the other.
 
-That boundary is what makes `tests/test_echo.py` four assertions with no
-scaffolding: your actual logic can be tested with no bus, no config, and no
-container. Everything that needs those lives in `service.py`, which is written
-once and rarely changes.
+The split that matters is the first one. **`api.py`, `echo.py` and
+`imagesize.py` must never import anything from the platform's infrastructure** —
+no event bus, no worker, no configuration, and no `cltl.backend`.
+`tests/test_layering.py` enforces it by parsing the imports.
+
+`cltl.backend` is on that list for a specific reason. `ImageExample.describe`
+receives the pixels as a plain `np.ndarray`, not the
+`cltl.backend.api.camera.Image` the platform's storage client actually returns,
+precisely so that an implementation cannot know the picture arrived over HTTP
+from anywhere in particular. numpy itself is fine: it is a data type, not a
+service. Resolving the reference is `service.py`'s job and nobody else's.
+
+That boundary is what makes `tests/test_echo.py` and `tests/test_imagesize.py`
+four assertions each with no scaffolding: your actual logic can be tested with no
+bus, no config, no container — and, for the image half, no HTTP server.
+Everything that needs those lives in `service.py`, which is written once and
+rarely changes.
 
 ### The second package, which has three files and is not yours
 
@@ -66,6 +86,65 @@ it would receive its own `ScenarioStarted` straight back.
 `DIContainer.start`/`stop` are no-ops that `__enter__`/`__exit__` call, and
 there is no worker registry to register with. If your own module only ever
 publishes — on a timer, or from an HTTP endpoint — it does not need one either.
+
+### One worker, two topics
+
+`ExampleService.start` hands its `TopicWorker` a *list*: `topic_input`, plus
+`topic_image` when that is configured. `_process` then dispatches on
+`event.metadata.topic`:
+
+```python
+if self._image_topic and event.metadata.topic == self._image_topic:
+    response = self._describe_image(event)
+else:
+    response = self._example.process(event.payload.signal.text)
+```
+
+Dispatching on the **topic** rather than on the payload type is the deliberate
+part. Both are available, but the topic is the one a deployment can rewire from
+configuration — which is the whole reason topic names are read from config in
+the first place. It is also why `topic` is metadata stamped by the bus on
+delivery rather than something a publisher sets: it tells a subscriber which of
+*its own* subscriptions an event arrived on. `cltl-monitoring` is the same shape
+with six topics.
+
+Two details that are easy to get wrong, and both are in the source with the
+reasoning attached:
+
+- **An empty `topic_image` has to be filtered out, not passed through.**
+  `TopicWorker` would subscribe to the empty string, which under kombu means a
+  real queue bound to the routing key `.<tenant>` and a consumer thread that can
+  never receive anything. `ExampleService.topics` is the one line that does the
+  filtering.
+- **`buffer_size` is raised from the default of 1.** The default rejection
+  strategy is `OVERWRITE`, which discards a queued event when the next one
+  arrives — so with an HTTP round trip on one of the two topics, an utterance
+  published while a fetch was in flight would simply vanish. `cltl-chat-ui` uses
+  256 for the same reason.
+
+### The injected image loader
+
+`ExampleService` does not construct its own storage client. `from_config` builds
+one and passes it in, as a `Callable[[str], np.ndarray]` — "pixels for this
+url":
+
+```python
+def load(file_url):
+    with ClientImageSource(file_url, storage_url) as source:
+        return source.capture().image
+```
+
+`cltl-monitoring` injects a `Callable[[str], ImageSource]` instead; narrowing it
+to the array is worth the deviation twice over. `capture()` raises outside a
+`with` block, so the context manager gets written once, in the one place it
+cannot be forgotten — and a test or `attach/inprocess.py` substitutes
+`lambda url: array`, with no fake HTTP server and no storage service anywhere.
+That seam is the only reason the image half is testable at rung 3 at all.
+
+The `cltl.backend` import lives inside that method, after the configuration
+checks. A deployment with `topic_image` empty never pays for it, and a
+misconfigured address is reported as a misconfigured address rather than as an
+`ImportError`.
 
 ## `service.py`
 

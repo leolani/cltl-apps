@@ -9,7 +9,12 @@ import unittest
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "myorg" / "example"
-FORBIDDEN_PREFIX = "cltl.combot.infra"
+# `cltl.backend` joins the list for the image half: `ImageExample` is handed a
+# numpy array precisely so that an implementation of it cannot know the pixels
+# arrived over HTTP from a storage service. Resolving the reference is
+# service.py's job. numpy itself is fine — it is a data type, not a platform
+# service.
+FORBIDDEN_PREFIXES = ("cltl.combot.infra", "cltl.backend")
 
 TENANT_SRC = Path(__file__).resolve().parent.parent / "src" / "myorg" / "tenant"
 # A NARROWER rule for myorg/tenant/scenario.py, rather than a relaxation of the
@@ -42,6 +47,9 @@ class LayeringTest(unittest.TestCase):
     def test_echo_has_no_infra_dependency(self):
         self._assert_no_infra_import(SRC / "echo.py")
 
+    def test_imagesize_has_no_infra_or_backend_dependency(self):
+        self._assert_no_infra_import(SRC / "imagesize.py")
+
     def test_scenario_does_not_touch_the_bus(self):
         path = TENANT_SRC / "scenario.py"
         offending = [m for m in _imported_modules(path)
@@ -57,10 +65,11 @@ class LayeringTest(unittest.TestCase):
                       list(_imported_modules(TENANT_SRC / "scenario.py")))
 
     def _assert_no_infra_import(self, path: Path):
-        offending = [m for m in _imported_modules(path) if m.startswith(FORBIDDEN_PREFIX)]
+        offending = [m for m in _imported_modules(path) if m.startswith(FORBIDDEN_PREFIXES)]
         self.assertEqual([], offending,
                          f"{path.name} imports platform infrastructure ({offending}); "
-                         f"pure logic must not depend on EventBus/TopicWorker.")
+                         f"pure logic must not depend on EventBus/TopicWorker, nor on "
+                         f"where a signal's pixels happen to be stored.")
 
 
 if __name__ == "__main__":

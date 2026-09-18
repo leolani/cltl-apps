@@ -51,11 +51,12 @@ Plain strings, and the platform's are namespaced `cltl.topic.*`:
 | `cltl.topic.text_in` | what a person said |
 | `cltl.topic.text_out` | what the agent says back |
 | `cltl.topic.scenario` | a conversation opening or closing — published here by `myorg.tenant`, because this deployment has no `cltl-context`; see [`tenancy.md`](tenancy.md) |
-| `cltl.topic.image` | an image signal |
+| `cltl.topic.image` | an image signal — a *reference* to a picture, never the pixels |
 | `cltl.topic.vad`, `cltl.topic.microphone` | audio pipeline internals |
 
-This template subscribes to the first and publishes to the second. That is the
-entire integration surface — which is the point of the architecture.
+This template subscribes to the first and the fourth, and publishes to the
+second. That is the entire integration surface — which is the point of the
+architecture.
 
 **Read topic names from configuration, never hardcode them.** `ExampleService`
 takes them from `[myorg.example] topic_input` / `topic_output`, so a deployment
@@ -83,6 +84,47 @@ payload = TextSignalEvent.for_agent(signal)     # or .for_speaker(signal)
 from the person — which is, among other things, what puts it on the correct
 side of the chat UI. This template only ever publishes `for_agent`; see
 `ExampleService._create_payload`.
+
+### An image is a reference
+
+`ImageSignalEvent` has one factory, `create`, and no `for_speaker`/`for_agent`:
+an image has no notion of who uttered it, so provenance is not annotated at all.
+What it wraps is the surprise:
+
+```python
+signal = event.payload.signal          # an emissor ImageSignal
+signal.array                           # None. ALWAYS None, on the bus.
+signal.files                           # ["cltl-storage:image/<id>"]
+signal.ruler.bounds                    # (0, 0, width, height) — a MultiIndex
+signal.mentions                        # regions somebody drew, if any
+```
+
+The pixels never travel. `ImageSignal.for_scenario` hardcodes `array=None`, and
+getting at the picture means resolving `files[0]` against the deployment's image
+store — a second HTTP hop, which `ClientImageSource` does for you:
+
+```python
+from cltl.backend.source.client_source import ClientImageSource
+
+with ClientImageSource(signal.files[0], storage_url) as source:
+    image = source.capture().image     # np.ndarray, (height, width, 3), RGB
+```
+
+It must be used as a context manager — `capture()` raises outside one — and
+`storage_url` must end in a slash. This template wraps those three lines in
+exactly one place per rung: `ExampleService._storage_loader` for the installed
+component, `connect.load_image` for the notebook and the script.
+
+Note `(height, width)`. numpy is row-major, so `shape[0]` is the height while
+every person and every UI says "width by height". It is the only real mistake
+available in `myorg/example/imagesize.py`, which is why its test measures a
+non-square image.
+
+The size is therefore declared **twice**: in `signal.ruler.bounds`, by whoever
+published the signal, and in the shape of whatever the reference resolves to.
+Answering with the second is the difference between trusting a reference and
+having resolved it — `ExampleService` does that, and warns when the two
+disagree.
 
 ## The one rule: always pass `source=`
 

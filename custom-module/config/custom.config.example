@@ -4,7 +4,14 @@
 #
 #   cp config/custom.config.example config/custom.config
 #   CLTL_AMQP_URL=amqp://leolani:leolani@127.0.0.1:5672/ CLTL_TENANT=tenant-a \
+#       CLTL_STORAGE_URL=http://127.0.0.1:8002/storage/ \
 #       venv/bin/python src/main.py
+#
+# CLTL_STORAGE_URL is where `cltl-storage:image/<id>` resolves — the address of
+# the deployment's storage service, from OUTSIDE its compose network, with the
+# trailing slash. [myorg.example] image_storage_url reads it, and the module
+# refuses to start on an empty or unexpanded value while topic_image is set.
+# Empty [myorg.example] topic_image in this file instead to run text-only.
 #
 # CLTL_TENANT is NOT optional and must NOT be empty. This component opens the
 # tenant's scenario (see [myorg.tenant] in config/default.config), and an

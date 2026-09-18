@@ -6,16 +6,19 @@ from cltl.combot.infra.di_container import DIContainer, singleton
 from cltl.combot.infra.event import Event
 from cltl.combot.infra.event.memory import SynchronousEventBus
 from cltl.combot.infra.time_util import timestamp_now
-from cltl.combot.event.emissor import TextSignalEvent
+from cltl.combot.event.emissor import ImageSignalEvent, TextSignalEvent
 from emissor.representation.scenario import TextSignal
 
 from myorg.example.container import ExampleContainer
 from myorg.tenant.container import TenantContainer
-from tests.support import DictConfigurationManager
+from tests.support import (DictConfigurationManager, fake_image_loader, image_signal,
+                           pixels)
 
 INPUT_TOPIC = "cltl.topic.text_in"
 OUTPUT_TOPIC = "cltl.topic.text_out"
 SCENARIO_TOPIC = "cltl.topic.scenario"
+IMAGE_TOPIC = "cltl.topic.image"
+IMAGE_URL = "cltl-storage:image/image-1"
 
 
 
@@ -62,6 +65,11 @@ class _InProcessContainer(ExampleContainer):
             "myorg.example": {
                 "topic_input": INPUT_TOPIC,
                 "topic_output": OUTPUT_TOPIC,
+                "topic_image": IMAGE_TOPIC,
+                # Never dialled — the loader it produces is replaced before any
+                # image is published. It still has to be non-empty and expanded,
+                # because from_config refuses both.
+                "image_storage_url": "http://localhost:8002/storage/",
             },
             "cltl.event": {
                 "implementation": "internal",
@@ -102,7 +110,25 @@ class ContainerLifecycleTest(unittest.TestCase):
         members = dir(ExampleContainer)
         self.assertIn("example_service", members)
         self.assertIn("example", members)
+        self.assertIn("image_example", members)
         self.assertNotIn("service", members)
+        # `image` in particular would collide with more than one platform
+        # component.
+        self.assertNotIn("image", members)
+
+    def test_an_image_round_trips_through_the_container(self):
+        # The loader is the one thing a container cannot build for itself here:
+        # there is no storage service in this process. Swapping it after
+        # construction is what attach/inprocess.py does, for the same reason.
+        with self.container:
+            self.container.example_service._image_loader = fake_image_loader(
+                {IMAGE_URL: pixels(700, 640)})
+
+            signal = image_signal("scenario-1", IMAGE_URL, 700, 640)
+            self.bus.publish(IMAGE_TOPIC, Event.for_scenario_payload(
+                "scenario-1", ImageSignalEvent.create(signal)))
+
+            self.assertIn("700x640", self.replies.get(timeout=1).payload.signal.text)
 
 
 class _InProcessTenantContainer(TenantContainer, ExampleContainer):

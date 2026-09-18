@@ -132,5 +132,11 @@ dmypy.json
 
 makefile.d
 
+# What the deployment's storage service writes: uploaded images, and audio if
+# anything ever records any. The two directories themselves ARE tracked, via
+# their .gitkeep files — read one before deleting it.
+deployment/storage/*/*
+!deployment/storage/*/.gitkeep
+
 
 **/.DS_Store

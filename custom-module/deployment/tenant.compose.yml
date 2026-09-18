@@ -19,6 +19,30 @@
 # utterances without source=, so an untenanted one would route to the bare
 # `cltl.topic.text_in` key, which no tenanted subscriber binds.
 #
+# cltl-monitoring would live here too, for a plainer reason: it SUBSCRIBES. It
+# keys its state by scenario id, so one shared instance would aggregate every
+# tenant's conversation behind a single URL. The rule this deployment follows is
+# "anything that reads the bus is tenanted" — which is also why `storage`, on
+# the server, is not. See docs/tenancy.md.
+#
+# It is behind a PROFILE and off by default, and the reason is not taste:
+# `ghcr.io/leolani/cltl-monitoring` is not a published package. Every other
+# image this deployment uses pulls anonymously; that one answers
+# `unauthorized` for `:latest` and for a version tag alike, while
+# cltl-emissor-data pulled from the same registry in the same minute. So the
+# default `up` must not ask for it. To turn it on, once the image exists (or
+# once you have built it yourself and tagged it):
+#
+#   CLTL_TENANT=tenant-a CLTL_CHATUI_PORT=8000 \
+#       CLTL_MONITORING_PORT=8010 \
+#       CLTL_MONITORING_URL=http://127.0.0.1:8010/monitoring \
+#       docker compose --profile monitoring -f deployment/tenant.compose.yml up -d
+#
+# Two variables rather than one because they are read by two different things:
+# the port is published here, and the URL is what a BROWSER is told to fetch.
+# CLTL_MONITORING_URL empty — the default — leaves the tab out of the page
+# altogether, which is better than a tab whose iframe cannot load.
+#
 # The chat UI stays BLANK until something opens this tenant's scenario. Nothing
 # in this file does: there is no cltl-context anywhere in this deployment. That
 # job belongs to the custom side — the notebook (rung 1), attach/listen.py
@@ -48,7 +72,47 @@ services:
       CLTL_AMQP_URL: amqp://leolani:leolani@rabbitmq:5672/
       # What makes this stack a tenant. Assigned, never defaulted — see `name:`.
       CLTL_TENANT: "${CLTL_TENANT:?set CLTL_TENANT to this tenant's id, e.g. tenant-a}"
+      # Where the chat UI PUTs the pixels of an uploaded image, so that the
+      # `cltl-storage:image/<id>` reference it publishes resolves for everyone
+      # else — this module included. Container-side view; the trailing slash is
+      # load-bearing (urljoin). One variable for chat-ui, monitoring and the
+      # rung-4 module, so the three cannot drift apart.
+      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:-http://storage:8000/storage/}
+      # The URL the BROWSER uses to reach this tenant's monitoring page, which
+      # the chat UI puts in an iframe. 127.0.0.1 and the PUBLISHED port,
+      # therefore — never `monitoring:8000`, which resolves on the compose
+      # network and nowhere a browser can see. chat.js appends
+      # /static/monitoring.html?scenario=<id> to it.
+      #
+      # Empty by default, which leaves the Monitoring tab out of the page —
+      # see the header: the monitoring image is not published, so the service
+      # behind this URL is opt-in.
+      CLTL_MONITORING_URL: ${CLTL_MONITORING_URL:-}
       CLTL_LOGGING_CONFIG: /cltl-chatui/config/logging.config
+    networks:
+      - cltl
+
+  monitoring:
+    # Opt-in: `docker compose --profile monitoring up -d`. See the header for
+    # why, and for the two variables to set with it. A profiled-out service is
+    # still INTERPOLATED, which is why nothing in this file uses `:?` for the
+    # monitoring variables — a required variable would fail the default `up`
+    # too, for a service that default `up` does not start.
+    profiles: ["monitoring"]
+    image: ghcr.io/leolani/cltl-monitoring:${CLTL_IMAGE_TAG:-latest}
+    restart: "no"
+    ports:
+      - "${CLTL_MONITORING_PORT:-8010}:8000"
+    volumes:
+      - ./config/tenant:/cltl-monitoring/config:ro
+    environment:
+      CLTL_AMQP_URL: amqp://leolani:leolani@rabbitmq:5672/
+      CLTL_TENANT: "${CLTL_TENANT:?set CLTL_TENANT to this tenant's id, e.g. tenant-a}"
+      # Monitoring only READS from storage: it resolves the same
+      # `cltl-storage:image/<id>` reference the chat UI published, with the same
+      # client this template's own module uses (ClientImageSource).
+      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:-http://storage:8000/storage/}
+      CLTL_LOGGING_CONFIG: /cltl-monitoring/config/logging.config
     networks:
       - cltl
 

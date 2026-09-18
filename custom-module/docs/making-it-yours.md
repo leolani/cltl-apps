@@ -102,9 +102,16 @@ the container-side path of the volume mount — which must match the new
 
 ## 7. Replace the placeholder
 
-- **`echo.py`** — your own logic, behind the `Example` ABC (rename that too;
-  `api.py` is one method).
-- **`tests/test_echo.py`** — tests for your logic.
+- **`echo.py`** — your own text logic, behind the `Example` ABC (rename that
+  too; it is one method).
+- **`imagesize.py`** — your own image logic, behind the `ImageExample` ABC. Or
+  delete both, and empty `[myorg.example] topic_image`: that removes the
+  subscription, the `cltl.backend` dependency's only user, and roughly a third
+  of `service.py`'s reason to exist. A module that answers text only is a
+  perfectly good module.
+- **`tests/test_echo.py`, `tests/test_imagesize.py`** — tests for your logic.
+  `test_imagesize.py` measures a non-square image on purpose; keep that habit
+  whatever you replace it with.
 - **`attach/`, `docs/`** — the teaching material. Keep them if you want the same
   onboarding story for people who copy *your* module; delete them if not.
 
