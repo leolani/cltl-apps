@@ -238,6 +238,54 @@ Use `--no-scenario` on `listen.py`, or `[myorg.tenant] start_scenario: false` on
 the container. Nothing detects this for you, deliberately — see
 [`tenancy.md`](tenancy.md#two-openers-one-tenant).
 
+### One reply where there used to be two, after a kernel or listener died
+
+Your module is gone and its scenario is not. Nothing in the platform expires
+one.
+
+`ChatUiService` holds the scenario id as plain in-memory state and clears it on
+exactly one thing, a `ScenarioStopped` — which nothing is going to send now.
+So the chat UI keeps working and keeps publishing utterances under a scenario
+whose owner is gone, and `cltl-eliza` (which ignores scenario ids entirely)
+keeps answering them. **That is why this does not look like a stale scenario:
+the page is not blank and nothing errors. You just stopped getting your own
+reply**, because the thing that produced it is dead.
+
+Confirm it without touching anything — this route exists precisely because it
+has no side effects:
+
+```
+$ curl -s localhost:8000/chatui/chat/scenario
+{"scenario_id":"d3b3d421-7f4f-4410-8448-7768cb28ec8f"}
+```
+
+**The cure is to open a new one, and nothing needs cleaning up first.** Re-run
+the notebook's scenario cell, or restart `attach/listen.py`. The chat UI assigns
+whatever `ScenarioStarted` arrives, unconditionally, so the new one simply takes
+over — the same fact as *Two scenarios for one tenant* above, seen from the
+other side.
+
+**Do not restart the chat UI container to fix it.** That clears the id, but the
+bus retains nothing: a listener that is still running will never re-announce its
+scenario, so you trade a stale scenario for a blank page and still have to open
+a new one.
+
+Three things that look like they should have handled this, and do not:
+
+- **`[cltl.chat-ui] timeout`** is the *browser session* timeout, in minutes. On
+  expiry it publishes a `quit` desire on `[cltl.chat-ui.events] topic_desire`;
+  it never clears the scenario id itself. This deployment sets `timeout: 0` and
+  configures no `topic_desire`.
+- **`DELETE /chatui/chat/terminate`** is the manual version of that, gated on the
+  same two settings. Here it logs `No-op on /chat/terminate`.
+- **`cltl-context`** is what would answer such a quit, and it is absent from both
+  halves of this deployment on purpose — which is why the custom side opens
+  scenarios at all. See [`tenancy.md`](tenancy.md).
+
+Killing the process is the common way to get here, and `kill -9` is sometimes
+the only way to stop a listener at all — see *`attach/listen.py` will not die
+after the deployment stops* below.
+
 ### One tenant sees another tenant's messages
 
 One of them came up untenanted, so it bound `<topic>.#` and matched everything.

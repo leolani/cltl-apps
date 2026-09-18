@@ -282,6 +282,23 @@ its own.
 Closing the scenario also clears the chat UI's transcript, which is a convenient
 way to see it land rather than taking it on faith.
 
+**Both do the buses even when the scenario close fails**, and that ordering is
+the point of the `try`/`finally` rather than tidiness: an open bus is what
+wedges a kernel, so a teardown that can raise before reaching it is the one
+shape this code must not have.
+
+**Nothing cleans up after a process that dies first.** No part of the platform
+expires a scenario — the chat UI holds the id until a `ScenarioStopped` arrives,
+and `[cltl.chat-ui] timeout` is a browser-session timeout that asks a
+`cltl-context` to end the conversation, which this deployment does not run. The
+chat UI therefore carries on publishing under a scenario whose owner is gone,
+and because `cltl-eliza` ignores scenario ids and answers anyway, the symptom is
+one reply where there were two rather than anything that looks broken. It is
+recoverable rather than damaged: open a new scenario and the chat UI takes
+whichever `ScenarioStarted` arrived last. [`gotchas.md`](gotchas.md) has the
+symptom, the one-line check, and why restarting the chat UI container is the
+wrong move.
+
 `KombuEventBus`'s consumer threads retry a lost connection **forever** by
 design. A bus left open keeps trying for the life of the process, which is why
 a notebook kernel will not shut down cleanly and why stopping the deployment
