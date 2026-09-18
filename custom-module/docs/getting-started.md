@@ -92,10 +92,9 @@ with.
 What you should see, in order:
 
 0. **A blank chat UI**, from step 1. Correct, not broken.
-1. **A connection**, and a binding check that reports it confirmed your
-   subscription against the management API in a fraction of a second. If it
-   instead says it fell back to a flat sleep, something is wrong with the
-   management URL — see [`gotchas.md`](gotchas.md).
+1. **A connection**, and a two-second pause while RabbitMQ binds the queue.
+   Nothing confirms that it did — the pause is a guess, deliberately, and
+   [`attaching.md`](attaching.md) is explicit about what that costs.
 2. **The chat UI coming alive**, the moment the `start_scenario` cell runs. Go
    and look at the browser tab; the agent's side of the conversation appears.
 3. **A live event.** Type something in the chat UI; a `TextSignalEvent` arrives

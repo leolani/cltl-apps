@@ -103,11 +103,12 @@ identity — is a constant in `src/myorg/tenant/scenario.py` and is the same for
 every tenant. The separation is the routing key, not the agent.
 
 `start_delay` is a guess, and it is the weakest part of the design. Rungs 1–2
-replace it with a real check against RabbitMQ's management API
-(`wait_until_bound(..., baseline={})`); a container cannot, because `requests`
-is not in the base image and `depends_on` does not reach across compose
-projects. Raising it costs only startup latency. See
-[`gotchas.md`](gotchas.md).
+make exactly the same guess with the same number — five seconds before opening
+the scenario — because the thing that has to be bound first is the chat UI's
+queue, in a different compose project that `depends_on` cannot order anything
+against, and the bus offers no way to ask whether it is. Raising it costs only
+startup latency. What would remove the guess altogether is in
+[`attaching.md`](attaching.md); see also [`gotchas.md`](gotchas.md).
 
 ## `$VAR` interpolation
 

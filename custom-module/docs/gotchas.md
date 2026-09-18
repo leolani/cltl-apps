@@ -12,9 +12,16 @@ Subscribing returns before RabbitMQ has actually bound your queue. Anything
 published in that window is dropped silently, because a topic exchange has
 nowhere to put a message matching no binding.
 
-Use `connect.wait_until_bound()` — the notebook and `listen.py` both do — or,
-inside a component, `topic_worker.start().wait()`, which means "subscribed" for
-the same reason. See [`attaching.md`](attaching.md).
+Sleep before you rely on the subscription — two seconds for one of your own,
+five when what has to be bound is somebody else's queue. That is a guess rather
+than a check, and [`attaching.md`](attaching.md) says what it does and does not
+buy, and what would actually fix it.
+
+**`topic_worker.start().wait()` is not the in-component version of this.** It
+is widely assumed to be, and it is not: `TopicWorker.run` sets `_started`
+immediately after `subscribe()` returns, which is exactly the moment that is
+not yet safe. A component in this position has the same race and the same
+non-answer — see `[myorg.tenant] start_delay` below.
 
 ### `ModuleNotFoundError: No module named 'cltl.backend'`, but the venv has it
 
@@ -59,32 +66,9 @@ As a one-off escape hatch, `%pip install -r ../requirements.notebook.txt` inside
 a cell installs into *the running kernel* whatever that turns out to be — which
 unblocks you, and leaves you running in an environment you did not choose.
 
-`load_image` raises this with the `sys.executable` of the kernel appended, so
-the answer is in the traceback itself.
-
-### `wait_until_bound` raises `TimeoutError` for a key that IS bound
-
-You subscribed a second handler to a topic this bus was already subscribed to.
-`KombuEventBus` keeps one consumer — one queue, one binding — per topic, and the
-second `subscribe` only appends your handler to that consumer's list. No new
-queue appears, so a check that waits for the count to *rise* can never pass, and
-the routing key it names in the error is bound already.
-
-Nothing is wrong and nothing needs waiting for: the handler went live when
-`subscribe` returned. Delete the call. Only the first subscription to a given
-topic on a given bus has a binding to wait for.
-
-### `401 Unauthorized` from the management API, then a flat sleep
-
-`wait_until_bound` needs credentials for RabbitMQ's **management API**, which
-authenticates separately from AMQP. Pass `amqp_url=` and it takes them from
-there.
-
-Without it, it falls back to the platform test harness's credentials, which are
-wrong for any other broker. The 401 then degrades to a flat two-second sleep
-rather than raising — deliberate, since the management plugin may genuinely be
-absent, but it means the binding check quietly stopped checking. The symptom is
-the intermittent dropped first message above, not an error.
+`load_image` catches that `ImportError` and re-raises it with the kernel's
+`sys.executable` appended, so the answer is in the traceback itself rather than
+on this page.
 
 ### Two agents answer every message
 
@@ -210,7 +194,9 @@ not listening. In order of likelihood:
 - **You opened it untenanted.** An untenanted publish lands on the bare
   `cltl.topic.scenario` key, which no tenanted chat UI binds. `listen.py`
   refuses this outright; a hand-written script will not.
-- **The publish beat the binding** (rung 4 only). See the next entry.
+- **The publish beat the binding.** Every rung guesses at this rather than
+  checking it — see the first entry on this page, and the module-container
+  entry below.
 
 ### The chat UI returns `500 Internal Server Error` when you type
 
@@ -232,10 +218,11 @@ Open a scenario first.
 before RabbitMQ has bound the queue, so a `ScenarioStarted` published into that
 window is dropped by the exchange — silently, on both sides.
 
-Rungs 1–2 close this properly by polling the management API
-(`wait_until_bound(..., baseline={})`). **Rung 4 cannot**: `requests` is not in
-the base image, and `depends_on` does not reach across compose projects. So the
-container waits a flat `start_delay` seconds instead, and that is a guess.
+Nothing anywhere closes this properly: rungs 1–2 sleep five seconds before
+opening the scenario and the container waits a flat `start_delay`, which is the
+same guess with the same number. `depends_on` does not reach across compose
+projects, and the bus offers no way to ask whether the other side has bound —
+see [`attaching.md`](attaching.md) for what would.
 
 `docker compose -f compose/example.compose.yml restart example` fixes it for
 now; raising `start_delay` fixes it for good, and costs only startup latency.

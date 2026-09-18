@@ -15,8 +15,7 @@ Start the deployment first:
 then join that tenant:
 
     python attach/listen.py --tenant tenant-a \\
-        --amqp-url amqp://leolani:leolani@127.0.0.1:5672/ \\
-        --management-url http://127.0.0.1:15672
+        --amqp-url amqp://leolani:leolani@127.0.0.1:5672/
 
 Type in that tenant's chat UI and you get TWO replies — the shared ELIZA's and
 this script's. Upload a picture in its Image tab and you get ONE, this
@@ -44,6 +43,7 @@ import logging
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 
 from cltl.combot.infra.event.api import Event
@@ -62,7 +62,7 @@ _connect = importlib.util.module_from_spec(
         "_cltl_example_connect", Path(__file__).resolve().parent / "connect.py"))
 sys.modules[_connect.__name__] = _connect
 _connect.__loader__.exec_module(_connect)
-event_bus, wait_until_bound = _connect.event_bus, _connect.wait_until_bound
+event_bus = _connect.event_bus
 start_scenario, stop_scenario = _connect.start_scenario, _connect.stop_scenario
 load_image, DEFAULT_STORAGE_URL = _connect.load_image, _connect.DEFAULT_STORAGE_URL
 
@@ -75,6 +75,11 @@ logger = logging.getLogger("listen")
 # package". If you change this, cltl.example.echo.EchoExample is unaffected
 # and vice versa — see docs/component.md.
 MARKER = " (via attach/listen.py)"
+
+# Seconds to wait for a binding nobody confirms. The first is about our own
+# consumer thread, the second about the chat UI's container — see main().
+SUBSCRIBE_DELAY = 2.0
+SCENARIO_DELAY = 5.0
 
 
 def transform(text: str):
@@ -102,7 +107,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--amqp-url", required=True, help="e.g. amqp://leolani:leolani@127.0.0.1:5672/")
-    parser.add_argument("--management-url", default=None, help="e.g. http://127.0.0.1:PORT (optional but recommended)")
     # Required, with NO default. There is no untenanted conversation to join
     # any more, and defaulting would pick a tenant on your behalf.
     parser.add_argument("--tenant", required=True,
@@ -192,23 +196,19 @@ def main():
         topics = [args.topic_input] if args.no_images else [args.topic_input, args.topic_image]
         for topic in topics:
             bus.subscribe(topic, handler)
-        # Default baseline: "is MY subscription live". ONE call for both topics,
-        # not one call each, and that is not tidiness — it is correctness.
-        # `wait_until_bound` snapshots the binding counts at the moment it is
-        # CALLED and waits for them to rise; a second call made after the first
-        # one returned would snapshot a world in which its own binding had
-        # already landed, so its count could never rise past its own baseline
-        # and it would time out. Subscribe both, then wait once.
-        wait_until_bound(args.management_url, topics, tenant=args.tenant,
-                         amqp_url=args.amqp_url)
+        # `subscribe` returns before RabbitMQ has bound the queue, and a topic
+        # exchange drops a message matching no binding — silently, on both
+        # sides. This is a guess, not a check: two seconds against a consumer
+        # thread that needs one AMQP round trip on localhost. See
+        # docs/attaching.md for what that buys and what it does not.
+        time.sleep(SUBSCRIBE_DELAY)
 
         if not args.no_scenario:
-            # baseline={}: a PRESENCE check, not an increment one. The queue
-            # that has to exist before this publish is the chat UI's, not ours,
-            # so waiting for the count to rise would be answered by our own
-            # subscription above.
-            wait_until_bound(args.management_url, [args.topic_scenario], tenant=args.tenant,
-                             amqp_url=args.amqp_url, baseline={})
+            # A longer wait, and a weaker guess: the queue that has to exist
+            # before this publish is the CHAT UI's, in another container, not
+            # ours. Five seconds is what [myorg.tenant] start_delay budgets for
+            # exactly the same problem at rung 4 — one number for one guess.
+            time.sleep(SCENARIO_DELAY)
             scenario = start_scenario(bus, args.topic_scenario)
             logger.info("Opened scenario %s for tenant %r — the chat UI should come "
                         "alive now.", scenario.id, args.tenant)

@@ -4,6 +4,7 @@ manipulation (CLAUDE.md forbids the latter outright).
 """
 import importlib.util
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ATTACH_DIR = Path(__file__).resolve().parent.parent / "attach"
@@ -16,42 +17,53 @@ def _load(name: str):
     return module
 
 
-class ConnectHelperTest(unittest.TestCase):
+class EventBusConfigTest(unittest.TestCase):
+    """What `connect.event_bus` builds, asserted through `connect.event_bus`.
+
+    kombu's `Connection` and `Exchange` are lazy, so constructing a
+    `KombuEventBus` opens no socket and starts no thread — nothing here needs a
+    broker. That makes it worth testing the real path rather than a copy of the
+    three lines inside it.
+    """
+
     @classmethod
     def setUpClass(cls):
         cls.connect = _load("connect")
 
-    def test_dict_configuration_manager_supplies_kombu_config(self):
-        manager = self.connect._DictConfigurationManager({
-            "cltl.event.kombu": {
-                "server": "amqp://localhost:5672/",
-                "exchange": "cltl.combot",
-                "compression": "bzip2",
-                "tenant": "",
-            }})
+    def _bus(self, server="amqp://localhost:5672/", **kwargs):
+        bus = self.connect.event_bus(server, **kwargs)
+        self.addCleanup(bus.close)
 
-        self.assertTrue("cltl.event.kombu" in manager)
-        config = manager.get_config("cltl.event.kombu")
+        return bus
 
-        self.assertEqual("amqp://localhost:5672/", config.get("server"))
-        # An absent key and an empty value are not the same thing:
+    def test_an_empty_tenant_is_present_rather_than_absent(self):
+        # The distinction the whole configuration exists to carry.
         # KombuEventBus does `config.get('tenant') if 'tenant' in config else
-        # None`, so the key must be PRESENT (even empty) for a bus explicitly
-        # configured with no tenant to behave the same as one where the
-        # concept was never mentioned at all.
-        self.assertTrue("tenant" in config)
-        self.assertEqual("", config.get("tenant"))
+        # None`, so a key that is present-but-empty yields '' while a missing
+        # one yields None. Both are falsy and the bus behaves identically, but
+        # '' is the proof that the key was written at all -- and a config that
+        # silently dropped it would bind the wrong routing key with no error.
+        self.assertEqual("", self._bus(tenant="")._tenant)
+        self.assertEqual("", self._bus()._tenant)
 
-    def test_missing_section_raises(self):
-        manager = self.connect._DictConfigurationManager({})
-        with self.assertRaises(ValueError):
-            manager.get_config("cltl.event.kombu")
+    def test_a_tenant_reaches_the_bus(self):
+        self.assertEqual("tenant-a", self._bus(tenant="tenant-a")._tenant)
 
-    def test_register_is_idempotent(self):
-        # Calling register() twice must not raise (kombu.serialization.register
-        # would otherwise be asked to register the same name twice).
-        self.connect.register()
-        self.connect.register()
+    def test_a_percent_encoded_password_survives(self):
+        # Why the parser is built with interpolation=None. Under the default
+        # interpolation this parses fine and then raises InterpolationSyntaxError
+        # from inside KombuEventBus.__init__, on `config.get('server')` --
+        # nowhere near the value that caused it. Percent-encoded broker
+        # credentials are not hypothetical -- attach/ used to unquote() them.
+        self._bus("amqp://leolani:p%40ss@127.0.0.1:5672/", tenant="tenant-a")
+
+    def test_loading_connect_twice_is_safe(self):
+        # Serialization is registered at import: the type vars with emissor and
+        # 'cltl-json' with kombu. Both registries are plain dicts, so a second
+        # import must overwrite rather than complain -- which is also what lets
+        # example.ipynb repeat the block verbatim in its setup cell.
+        _load("connect")
+        _load("connect")
 
 
 class EventJsonTest(unittest.TestCase):
@@ -82,7 +94,7 @@ class EventJsonTest(unittest.TestCase):
 
         event = self._event()
 
-        self.assertEqual(json.loads(self.connect._serializer(event)),
+        self.assertEqual(json.loads(self.connect.serializer(event)),
                          json.loads(self.connect.event_json(event)))
 
     def test_it_reaches_the_payload(self):
@@ -94,27 +106,6 @@ class EventJsonTest(unittest.TestCase):
 
     def test_it_is_indented_for_reading(self):
         self.assertIn("\n  ", self.connect.event_json(self._event()))
-
-
-class BindingKeyTest(unittest.TestCase):
-    """The routing rule the whole of docs/tenancy.md is about, as an assertion."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.connect = _load("connect")
-
-    def test_a_tenanted_subscriber_binds_exactly_its_own_tenant(self):
-        self.assertEqual("cltl.topic.scenario.tenant-a",
-                         self.connect.binding_key("cltl.topic.scenario", "tenant-a"))
-
-    def test_an_untenanted_subscriber_binds_every_tenant(self):
-        # `#` matches ZERO OR MORE words in RabbitMQ, so this matches every
-        # tenant's traffic AND the bare topic. That asymmetry is what lets one
-        # shared cltl-eliza serve every tenant.
-        self.assertEqual("cltl.topic.scenario.#",
-                         self.connect.binding_key("cltl.topic.scenario", ""))
-        self.assertEqual("cltl.topic.scenario.#",
-                         self.connect.binding_key("cltl.topic.scenario"))
 
 
 class ScenarioHelperTest(unittest.TestCase):
@@ -191,16 +182,23 @@ class ImageHelperTest(unittest.TestCase):
         self.assertIsNone(self.listen.describe_image(None))
         self.assertIsNone(self.listen.describe_image(np.zeros((0, 0, 3), dtype=np.uint8)))
 
+    def test_a_failed_import_names_the_interpreter(self):
+        # docs/gotchas.md promises this, and it is the only place the hint can
+        # land: every cell above load_image needs only cltl.combot and emissor,
+        # which the wrong environment usually also has -- so a notebook on the
+        # wrong kernel works perfectly until here and then fails on a package
+        # you can see is installed.
+        #
+        # A None in sys.modules is how you make an import fail for a package
+        # that IS installed: Python raises rather than re-importing.
+        import sys
 
-class WaitUntilBoundBaselineTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.connect = _load("connect")
+        with unittest.mock.patch.dict(
+                sys.modules, {"cltl.backend.source.client_source": None}):
+            with self.assertRaises(ImportError) as raised:
+                self.connect.load_image("cltl-storage:image/x")
 
-    def test_no_management_url_still_takes_the_flat_sleep_path(self):
-        # `baseline` must not disturb the documented fallback: with no
-        # management API there is nothing to ask, whichever question was meant.
-        self.connect.wait_until_bound(None, ["cltl.topic.scenario"], baseline={})
+        self.assertIn(sys.executable, str(raised.exception))
 
 
 if __name__ == "__main__":

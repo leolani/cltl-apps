@@ -4,6 +4,12 @@
 [`tenant-isolation.md`](tenant-isolation.md), which produced the two-half
 deployment this builds on.
 
+> **Partly superseded** by [`attach-simplification.md`](attach-simplification.md)
+> (2026-09-18), which deleted `wait_until_bound` and `binding_key` in favour of
+> a flat `time.sleep`. Passages below describing the binding check, its
+> `baseline=` keyword and the subscribe-then-wait-once rule are a record of what
+> was built, not of what is there now.
+
 ---
 
 ## 1. Context

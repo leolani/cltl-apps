@@ -24,27 +24,66 @@ configuration files. Rungs 1–2 skip all of it: `KombuEventBus` asks its
 configuration manager exactly one question — `get_config("cltl.event.kombu")`
 — and needs the answer to support `.get(key)` and `in`.
 
-So `attach/connect.py` hands it a plain dict wearing that interface. That is
-the whole trick, and it is why attaching needs no config files, no container
-and no install of this template. The platform's own test harness solves this
-problem the same way.
+The platform's own `LocalConfigurationManager` already provides that, over a
+plain `ConfigParser` — and a `ConfigParser` can be built from a dict without
+touching the filesystem. So `attach/connect.py` builds one from four values and
+hands it over:
+
+```python
+parser = ConfigParser({}, strict=False, interpolation=None)
+parser.read_dict({"cltl.event.kombu": {
+    "server": server, "exchange": exchange,
+    "compression": compression, "tenant": tenant}})
+
+KombuEventBus("cltl-json", LocalConfigurationManager(parser))
+```
+
+That is the whole trick, and it is why attaching needs no config files, no
+container and no install of this template. Two details in it are not cosmetic:
+
+- **`interpolation=None`.** The default interpolation scans every value on
+  read, so a percent-encoded broker password — `amqp://user:p%40ss@host/` —
+  parses fine here and then raises `InterpolationSyntaxError` from inside
+  `KombuEventBus.__init__`, nowhere near the value that caused it. Nothing here
+  wants `$VAR` expansion: this config is composed in Python, which is where a
+  caller can interpolate whatever it likes. A `.config` file on disk cannot,
+  which is what `EnvInterpolation` exists for.
+- **`tenant` is present even when empty.** The bus does `config.get('tenant')
+  if 'tenant' in config else None`, so an omitted key yields `None` and an
+  empty one yields `''`. The bus behaves identically either way — but writing
+  the key is what says the untenanted bus was *meant*.
+
+**Why not `KombuEventBusContainer`?** It registers the serializer for you, and
+for a single bus it is the better answer. But `DIContainer._singletons` is
+process-global — keyed on the property name, not on the container instance — so
+three containers in one kernel hand you one bus with one tenant, and the
+isolation section below needs three. The platform's own harness reached the
+same conclusion, and wrote it down in `_TenantConfigurationManager`'s docstring.
 
 ## Five things that go wrong the first time
 
 **1. `TypeError: PAYLOAD is not a dataclass and cannot be turned into one`**
 
 Emissor's serialisation needs its generic type variables registered before
-anything marshals an `Event`. `connect.register_event_types()` does it once,
-idempotently, and every function in `connect.py` that touches the bus calls it
-first. Write your own entry point and you must do the same.
+anything marshals an `Event`. `connect.py` does it at import, as a module-level
+`register_type_var(PAYLOAD)` / `(SIG)` / `(MEN)` — the same three lines every
+component's `src/main.py` runs before it builds anything. There is no guard on
+them and none is needed: `register_type_var` is a single dict assignment, so
+running it twice costs nothing. Write your own entry point and you must do the
+same.
 
 **2. `SerializerNotInstalled`, deep inside kombu**
 
-`KombuEventBus` takes a serializer *name* and looks it up in kombu's global
-registry. If nothing ever registered that name the failure surfaces a long way
-from the cause. `connect.register()` registers `'cltl-json'` before any bus is
-constructed — and `connect.event_bus()` calls it for you, so simply using that
-factory is enough.
+`KombuEventBus` takes a serializer *name*, not a function, and looks it up in
+kombu's global registry at publish and consume time. If nothing ever registered
+that name, the failure surfaces a long way from the cause — inside kombu, from a
+bus that constructed perfectly. `connect.py` registers `'cltl-json'` at import,
+beside the type vars, so importing it is enough.
+
+The notebook's setup cell writes both of those out again rather than importing
+them. That is deliberate: they are two of the five things on this list, and an
+import would hide them behind a line that looks like housekeeping. Registering
+the same names twice is a no-op.
 
 **3. The chat UI is blank and stays blank**
 
@@ -76,74 +115,46 @@ in that window is routed to no queue at all and dropped, because that is what a
 topic exchange does with a message matching no binding. No error, on either
 side.
 
-`connect.wait_until_bound()` closes the window: it polls RabbitMQ's management
-API and waits for the number of queues bound to your topic to actually rise.
+The notebook and `listen.py` close that window with a flat `time.sleep`. **That
+is a guess, not a check**, and it is worth saying so plainly rather than
+dressing it up: nothing confirms the binding ever landed.
 
-### Two different questions, and `baseline=`
+### Two seconds, and where five is used instead
 
-The default behaviour answers **"is *my* subscription live"**: snapshot the
-counts, wait for them to rise by one.
+For a subscription of your own, two seconds. What you are waiting on is one
+consumer thread getting scheduled and then one AMQP round trip against a broker
+on localhost — tens of milliseconds. In the notebook the next thing to happen
+is a person typing into the chat UI, so the real margin is larger again by
+orders of magnitude.
 
-Opening a scenario needs the other question — **"is *anyone* bound yet"** —
-because the queue that has to exist belongs to the chat UI, not to you. Waiting
-for a rise would be answered by your own subscription. Passing `baseline={}`, an
-all-zero starting point, turns the increment check into a presence check:
+**Before `start_scenario`, five.** That wait is a different quantity: the queue
+that has to exist is the **chat UI's**, in another container, and nothing in a
+notebook can observe it. Five seconds is what `[myorg.tenant] start_delay`
+budgets for exactly this problem at rung 4, so there is one number for one
+guess across the rungs. [`configuration.md`](configuration.md) calls that number
+the weakest part of the design; it is no stronger here.
 
-```python
-wait_until_bound(MANAGEMENT_URL, [TOPIC_SCENARIO], tenant=TENANT,
-                 amqp_url=AMQP_URL, baseline={})
-scenario = start_scenario(bus, TOPIC_SCENARIO)
-```
+### What would actually fix it
 
-Same trick, same reason, as `ComposeRunner.await_bindings(topics, {}, tenant)`
-in the platform's own harness.
+The bus confirming its own binding. kombu's `ConsumerMixin` fires
+`on_consume_ready` once a consumer's queues are declared and bound, so
+`KombuEventBus.subscribe` could wait on that and the guess would disappear for
+every caller — this template's and the platform's own. It would also make
+`topic_worker.start().wait()` mean what it is widely assumed to mean; today it
+is set the instant `subscribe()` returns, which is the very moment that is not
+yet safe.
 
-**Subscribe to everything you want, then wait once.** The snapshot is taken when
-`wait_until_bound` is *called*, so a second call made after the first returned
-would snapshot a world in which its own binding had already landed — its count
-could never rise past its own baseline, and it times out. `listen.py` subscribes
-to both its topics and then makes one call covering both; the notebook's
-isolation cell does one bus at a time for the same reason. The arrangement that
-looks tidier is the broken one, and it has already cost this repository once.
+That is a change to `cltl.combot`, not to this template, and it is not made
+here.
 
-**And only wait for a topic this bus has not subscribed to before.**
+**And only sleep for a topic this bus has not subscribed to before.**
 `KombuEventBus` keeps one consumer per topic — one queue, one binding — so a
 second `subscribe` to a topic it is already consuming appends your handler to
 that consumer's list and creates no new queue
-([`kombu.py`](https://github.com/leolani/cltl-combot)'s `subscribe`). The count
-therefore cannot rise, and the call does not merely return early: it hangs for
-the whole timeout and then raises. The second handler is live as soon as
-`subscribe` returns.
-
-That is why the notebook's wire-up cell subscribes `respond` to two topics that
-`show` and `show_image` already bound, and then waits for *nothing*. Getting
-this wrong is a 30-second hang followed by a `TimeoutError` naming routing keys
-that are, in fact, bound — which reads like a broker problem and is not one.
-
-**Why counting, and not just checking?** The deployment's own modules are
-already subscribed to `cltl.topic.text_in` before you arrive. "Is anything
-bound to this topic" is answered *yes* by somebody else's queue. So
-`wait_until_bound` records the count *before* you subscribe and waits for it to
-rise — that is what makes the check about **your** subscription rather than
-about the deployment being up.
-
-### The management API needs its own credentials
-
-RabbitMQ's HTTP management API authenticates separately from AMQP. Pass
-`amqp_url=` and `wait_until_bound` takes the credentials from there — the
-notebook and `listen.py` both do.
-
-Omit it and it falls back to a pair that is right for the platform's test
-harness and wrong for every other broker. The mismatch returns 401, and **a 401
-degrades to a flat two-second sleep rather than raising**. That is deliberate —
-the management plugin may genuinely be absent — but it means a credentials
-mistake is quiet, and reintroduces exactly the race this function exists to
-close. The symptom is an occasional dropped first message, never an error
-message.
-
-When it works, it says so, and it takes a fraction of a second. If you see it
-report a fallback sleep, check the management URL and credentials before
-believing anything else on this page.
+([`kombu.py`](https://github.com/leolani/cltl-combot)'s `subscribe`). The
+handler is live the moment `subscribe` returns; there is genuinely nothing to
+wait for. That is why the notebook's wire-up cell subscribes `respond` to two
+topics that `show` and `show_image` already bound, and then waits for *nothing*.
 
 **5. `ModuleNotFoundError` for a package the venv demonstrably has**
 
@@ -173,8 +184,8 @@ and cure in [`gotchas.md`](gotchas.md#modulenotfounderror-no-module-named-cltlba
 
 ## Getting the pixels of an image
 
-`connect.load_image` is the fifth helper, and it exists because the surprise is
-worth meeting once at rung 1: an image signal does not contain an image.
+`connect.load_image` is the last of the helpers, and it exists because the
+surprise is worth meeting once at rung 1: an image signal does not contain an image.
 
 ```python
 image = load_image(signal.files[0], DEFAULT_STORAGE_URL)
@@ -204,22 +215,28 @@ text cells keep working without it.
 **Which is also how you learn your notebook is not running in the venv.** See
 the fifth item above: `load_image` is usually the first cell that needs anything
 the *other* environment does not already have, so a kernel on the wrong
-interpreter fails precisely here and nowhere earlier.
+interpreter fails precisely here and nowhere earlier. It therefore reports the
+interpreter it failed on — `sys.executable`, in the `ImportError` itself — so
+the answer is in the traceback rather than three pages away.
 
 ## Seeing what actually crossed the wire
 
 `connect.event_json(event)` returns the JSON the broker carried, pretty-printed
-— `marshal(event, cls=Event)`, which *is* the function `register()` hands kombu
-as the `cltl-json` serializer. Not a `repr`, and not a reconstruction: what you
+— `marshal(event, cls=Event)`, which *is* the function handed to kombu as the
+`cltl-json` serializer. Not a `repr`, and not a reconstruction: what you
 read is the publisher's bytes with whitespace added.
 
 Two cells in the notebook show it, one per modality, and both are worth opening
 exactly once. The image one settles the claim this page makes twice over:
 `"array": null`, a `cltl-storage:` string in `files`, and a `ruler.bounds` that
-declares a size nothing has yet checked against the pixels. The text one is
-where you can see that `metadata.topic` ends in the tenant — the routing key a
-message arrived on is stamped onto the event, which is why `_process` can
-dispatch on it.
+declares a size nothing has yet checked against the pixels. The text one settles what
+`metadata.topic` actually holds: the **bare** topic you subscribed with, with no
+tenant on the end. The tenant rides in `metadata.tenant`, and the `.tenant-a`
+suffix exists only in the AMQP routing key — `KombuEventBus` stamps the plain
+topic on delivery (`_topic_handler`, via `Event.with_topic`). That is precisely
+why `_process` can dispatch on it: if the suffix were there, every
+`event.metadata.topic == self._image_topic` in this repository would stop
+matching.
 
 **Folded, because a payload is sixty lines and a notebook is read top to
 bottom.** The notebook wraps the JSON in a plain HTML `<details>` block rather
@@ -245,8 +262,8 @@ Two points of technique there, both reusable:
   another tenant and receiving nothing is exactly what you would also see with
   the broker down, the chat UI unplugged, or nobody typing. The result worth
   reporting is that the untenanted observer *did* see the conversation and the
-  other tenant did not. Same reasoning as `wait_until_bound` counting bindings
-  rather than checking for them.
+  other tenant did not. A negative result is worth only as much as the positive
+  one beside it.
 - **It covers the image topic too**, so the claim is about both modalities. Note
   what it does *not* cover: the pixels themselves. Those live in a shared,
   untenanted store, and the routing key has no say over who can `GET` them —
@@ -279,8 +296,7 @@ identical logic.
 
 ```bash
 python attach/listen.py --tenant tenant-a \
-    --amqp-url amqp://leolani:leolani@127.0.0.1:5672/ \
-    --management-url http://127.0.0.1:15672
+    --amqp-url amqp://leolani:leolani@127.0.0.1:5672/
 ```
 
 `--tenant` is **required and has no default**. There is no untenanted
@@ -293,6 +309,6 @@ and is refused unless you also pass `--no-scenario` — an untenanted
 conversation: its own module container, or another listener. Two openers for one
 tenant leaves the chat UI on whichever arrived last.
 
-`--help` lists the rest: management URL, and the input, output and scenario
-topics. It runs until `Ctrl-C`, then closes the scenario before the bus — in a
+`--help` lists the rest: the input, output, image and scenario topics, and
+where `cltl-storage:` resolves. It runs until `Ctrl-C`, then closes the scenario before the bus — in a
 `finally`, so a crash does the same.

@@ -8,24 +8,25 @@ whole of what `KombuEventBus` actually asks for. Shared by the notebook
 The functions below map onto the things that go wrong the first time someone
 tries this:
 
-  1. `register()`      — without it, `marshal(event, cls=Event)` raises
-                          `TypeError: PAYLOAD is not a dataclass`.
-  2. `event_bus()`      — the bus itself; a bare dict stands in for a
-                          ConfigurationManager, following
-                          integration/src/cltl_integration/runner/tenants.py:77-127.
-  3. `wait_until_bound()` — `KombuEventBus.subscribe` returns before RabbitMQ
-                          has actually bound the queue. Anything published in
-                          that window is silently dropped by the exchange.
-                          Without this, "the first message never arrived"
-                          is the most common report this template will get.
-  4. `start_scenario()`  — a tenanted chat UI renders nothing and refuses to
+  1. serialization       — the module-level block just below. Without the type
+                          vars, `marshal(event, cls=Event)` raises `TypeError:
+                          PAYLOAD is not a dataclass`; without the kombu
+                          registration, `KombuEventBus` fails with a
+                          `SerializerNotInstalled` raised deep inside kombu at
+                          publish time rather than at construction.
+  2. `event_bus()`       — the bus itself. `KombuEventBus` wants a
+                          `ConfigurationManager`, and the platform's own
+                          `LocalConfigurationManager` takes a plain
+                          `ConfigParser` — which is buildable from a dict in two
+                          lines. No container, no file on disk.
+  3. `start_scenario()`  — a tenanted chat UI renders nothing and refuses to
                           publish until a `ScenarioStarted` arrives on ITS
                           routing key, and in this template's deployment
                           nothing opens one for you: there is no cltl-context.
                           This is NOT something a normal attached module does.
                           It is the price of running the chat UI inside a
                           tenant. See docs/tenancy.md.
-  5. `load_image()`      — an image signal carries no pixels. `signal.array` is
+  4. `load_image()`      — an image signal carries no pixels. `signal.array` is
                           always `None` on the bus; `signal.files[0]` is a
                           `cltl-storage:image/<id>` reference, and turning that
                           into pixels is a second HTTP hop against a service
@@ -33,136 +34,120 @@ tries this:
                           bytes. "I subscribed to the image topic and the
                           image was empty" is the report this one prevents.
 
-`new_scenario`/`start_scenario`/`stop_scenario` below are deliberately a copy of
-integration/src/cltl_integration/drivers/scenario.py and a parallel of this
-template's own src/myorg/tenant/scenario.py, rather than an import of either:
-rung 1 has nothing installed. Same reasoning as the echo transform duplicated in
-attach/listen.py — see docs/component.md.
+There is a fifth, and it has no function here because there is nothing honest
+to put in one: `KombuEventBus.subscribe` returns BEFORE RabbitMQ has bound the
+queue, and anything published into that window is dropped by the exchange
+without an error on either side. The notebook and `listen.py` close that window
+with a flat `time.sleep`, which is a guess rather than a check. Why that is
+good enough here — and what it is not good enough for — is in
+docs/attaching.md.
+
+`new_scenario`/`start_scenario`/`stop_scenario` below are deliberately a
+duplicate of this template's own src/myorg/tenant/scenario.py (and of the
+publishing half of src/myorg/tenant/service.py), rather than an import: rung 1
+has nothing installed. They are a close variant of
+integration/src/cltl_integration/drivers/scenario.py rather than a copy of it —
+that one publishes with `Event.for_payload` and hardcodes its agent and
+location. Same reasoning as the echo transform duplicated in attach/listen.py —
+see docs/component.md.
 """
 import json
 import logging
-import threading
-import time
+import sys
 import uuid
-from typing import Iterable, Mapping, Optional
-from urllib.parse import unquote, urlparse
+from configparser import ConfigParser
+from typing import Optional
 
-import requests
 from cltl.combot.event.emissor import (MEN, SIG, Agent, LeolaniContext,
                                        ScenarioStarted, ScenarioStopped)
-from cltl.combot.infra.config import Configuration, ConfigurationManager
+from cltl.combot.infra.config.local import LocalConfigurationManager
 from cltl.combot.infra.event.api import PAYLOAD, Event
 from cltl.combot.infra.event.kombu import KombuEventBus
 from cltl.combot.infra.time_util import timestamp_now
 from emissor.representation.scenario import Modality, Scenario
 from emissor.representation.util import marshal, register_type_var, unmarshal
-from kombu.serialization import register as _register_serializer
+# Safe to import under its own name now. It was aliased for a while because
+# this module also defined a function called `register`, which shadowed it and
+# turned the call below into infinite self-recursion disguised as a TypeError
+# about unexpected keyword arguments (docs/plans/bootstrap.md, gotcha 4).
+from kombu.serialization import register
 
 logger = logging.getLogger(__name__)
 
 SERIALIZER = "cltl-json"
 EXCHANGE = "cltl.combot"
 
-_registered = False
-_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Serialization, done once at import.
+#
+# Every component's own src/main.py does exactly this before constructing
+# anything that touches the bus. No lazy guard and no lock: `register_type_var`
+# is a single dict assignment (emissor/representation/util.py) and kombu's
+# `register` writes one registry entry, so doing either twice is a no-op. The
+# notebook repeats this block verbatim in its setup cell, on purpose — the
+# repeat registers the same name with equivalent functions and changes nothing.
+# ---------------------------------------------------------------------------
+
+register_type_var(PAYLOAD)
+register_type_var(SIG)
+register_type_var(MEN)
 
 
-def register_event_types() -> None:
-    """Register the generic type variables emissor needs to (un)marshal events.
-
-    Idempotent and safe to call more than once — emissor keeps a process-global
-    registry. Every component's own `src/main.py` does this same thing before
-    constructing anything that touches the bus; see this template's own
-    `src/main.py` or `integration/src/cltl_integration/serialization.py`.
-    """
-    global _registered
-    with _lock:
-        if _registered:
-            return
-        for type_var in (PAYLOAD, SIG, MEN):
-            register_type_var(type_var)
-        _registered = True
+def serializer(obj) -> str:
+    return marshal(obj, cls=Event)
 
 
-def _serializer(event: Event) -> str:
-    register_event_types()
-    return marshal(event, cls=Event)
+def deserializer(obj: str):
+    return unmarshal(obj, cls=Event)
 
 
-def _deserializer(raw: str) -> Event:
-    register_event_types()
-    return unmarshal(raw, cls=Event)
+register(SERIALIZER, serializer, deserializer,
+         content_type='application/json', content_encoding='utf-8')
 
 
 def event_json(event: Event, indent: int = 2) -> str:
     """The JSON that actually crossed the broker for `event`, pretty-printed.
 
     Not a reconstruction and not a `repr`: `marshal(event, cls=Event)` is the
-    very function `register()` hands kombu as the `cltl-json` serializer, so
-    this is the publisher's bytes with whitespace added. Reading it is the
-    fastest way to settle what a payload really contains — that an image
-    signal's `array` is `null`, that `files` holds a `cltl-storage:` reference,
-    that `metadata.topic` carries the tenant suffix the bus stamped on delivery.
+    very function kombu was handed above as the `cltl-json` serializer, so this
+    is the publisher's bytes with whitespace added. Reading it is the fastest
+    way to settle what a payload really contains — that an image signal's
+    `array` is `null`, that `files` holds a `cltl-storage:` reference, and that
+    the tenant an event belongs to rides in `metadata.tenant`.
+
+    Note what `metadata.topic` is NOT. It holds the BARE topic, not the routing
+    key: the tenant suffix exists only in AMQP, and `KombuEventBus` stamps the
+    plain topic you subscribed with on delivery (`_topic_handler`, via
+    `Event.with_topic`). That is precisely why dispatching on
+    `event.metadata.topic` works — see `listen.py`'s handler and
+    `ExampleService._process`. If the suffix were there, both would stop
+    matching.
 
     A round trip through `json.loads` rather than `indent=` on the marshaller:
     emissor's `marshal` takes no formatting options, and parsing what it
     produced also proves it is JSON rather than something JSON-shaped.
     """
-    return json.dumps(json.loads(_serializer(event)), indent=indent)
-
-
-class _DictConfiguration(Configuration):
-    """The `.get(key, multi=False)` / `key in config` surface, over a plain dict."""
-
-    def __init__(self, values: Mapping[str, str]):
-        self._values = dict(values)
-
-    def get(self, key, multi=False):
-        if multi:
-            return [v.strip() for v in self._values[key].split(",") if v.strip()]
-        return self._values[key]
-
-    def __contains__(self, key):
-        return key in self._values
-
-
-class _DictConfigurationManager(ConfigurationManager):
-    """The one section `KombuEventBus` reads (`cltl.event.kombu`), nothing else.
-
-    `KombuEventBus.__init__` asks a `ConfigurationManager` for exactly one
-    config, and that `Configuration` for `.get(key)` and `'tenant' in config` —
-    no DI container required. Same trick the integration harness uses to hand
-    a test process a tenanted bus of its own.
-    """
-
-    def __init__(self, sections: Mapping[str, Mapping[str, str]]):
-        self._sections = {name: _DictConfiguration(values) for name, values in sections.items()}
-
-    def has_config(self, name: str) -> bool:
-        return name in self._sections
-
-    def get_config(self, name: str, callback=None) -> Configuration:
-        if name not in self._sections:
-            raise ValueError(f"No configuration for {name}")
-        return self._sections[name]
-
-
-def register() -> None:
-    """Register event (de)serialization under the name `KombuEventBus` expects.
-
-    `KombuEventBus` takes a serializer *name*, not a function, and looks it up
-    in kombu's own registry at publish/consume time — it fails opaquely (a
-    `SerializerNotInstalled` deep inside kombu, not at construction) if the
-    name was never registered. Call this before constructing any bus.
-    """
-    register_event_types()
-    _register_serializer(SERIALIZER, _serializer, _deserializer,
-                         content_type='application/json', content_encoding='utf-8')
+    return json.dumps(json.loads(serializer(event)), indent=indent)
 
 
 def event_bus(server: str, tenant: str = "", exchange: str = EXCHANGE,
-             compression: str = "bzip2") -> KombuEventBus:
+              compression: str = "bzip2") -> KombuEventBus:
     """A `KombuEventBus` on someone else's running deployment.
+
+    `KombuEventBus.__init__` asks a `ConfigurationManager` for one section,
+    `cltl.event.kombu`, and asks that `Configuration` for `.get(key)` and
+    `'tenant' in config` — no DI container required. The platform's own
+    `LocalConfigurationManager` wraps a plain `ConfigParser`, and a
+    `ConfigParser` is buildable from a dict, so the four values below are the
+    entire configuration this process needs.
+
+    `interpolation=None` is load-bearing rather than tidiness. The default
+    interpolation scans every value on read, so a percent-encoded broker
+    password — `amqp://user:p%40ss@host/` — parses fine here and then raises
+    `InterpolationSyntaxError` from inside `KombuEventBus.__init__`. Nothing
+    below wants `$VAR` expansion: this config is composed in Python, which is
+    where a caller can interpolate whatever it likes.
 
     `server` is the AMQP URL — `amqp://leolani:leolani@127.0.0.1:5672/` for
     the deployment in deployment/server.compose.yml (docs/deployment.md). The
@@ -175,131 +160,26 @@ def event_bus(server: str, tenant: str = "", exchange: str = EXCHANGE,
     Empty subscribes to every tenant on the exchange, which makes a fine
     read-only observer but CANNOT open a scenario — an untenanted publish lands
     on the bare topic key that no tenanted subscriber binds. See docs/tenancy.md.
-    A subscriber never steals another consumer's
-    messages regardless: every `subscribe` gets its own server-named,
-    exclusive, auto-delete queue.
+    A subscriber never steals another consumer's messages regardless: every
+    `subscribe` gets its own server-named, exclusive, auto-delete queue.
+
+    How the tenant becomes a routing key is `KombuEventBus`'s business and
+    nobody else's. Publish and subscribe with bare topic names; the bus builds
+    `<topic>.<tenant>` (or binds `<topic>.#` when untenanted) on its own.
     """
-    register()
-    return KombuEventBus(SERIALIZER, _DictConfigurationManager({
+    parser = ConfigParser({}, strict=False, interpolation=None)
+    parser.read_dict({
         "cltl.event.kombu": {
             "server": server,
             "exchange": exchange,
             "compression": compression,
+            # Present even when empty, and that is not the same as absent:
+            # KombuEventBus does `config.get('tenant') if 'tenant' in config
+            # else None`, so an explicitly untenanted bus has to say so.
             "tenant": tenant,
-        }}))
+        }})
 
-
-def binding_key(topic: str, tenant: str = "") -> str:
-    """The routing key a subscriber to `topic` binds, as KombuEventBus builds it.
-
-    A tenanted subscriber binds exactly `<topic>.<tenant>`. An untenanted one
-    binds `<topic>.#`, and `#` in RabbitMQ matches ZERO OR MORE words — so it
-    matches every tenant's traffic AND the bare topic. That asymmetry is the
-    whole of the isolation mechanism, which is why it lives here as one
-    testable function rather than inline. Mirrors `ComposeRunner.binding_key`
-    in integration/src/cltl_integration/runner/compose.py.
-    """
-    return f"{topic}.{tenant}" if tenant else f"{topic}.#"
-
-
-def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
-                     tenant: str = "", timeout: float = 30.0,
-                     amqp_url: Optional[str] = None,
-                     baseline: Optional[Mapping[str, int]] = None) -> None:
-    """Block until RabbitMQ has actually bound queues for `topics`.
-
-    `KombuEventBus.subscribe` starts a background consumer thread and returns
-    immediately — the queue is declared and bound to the exchange somewhere in
-    that thread's future, not before this call returns. Anything published
-    into that window is routed to no queue and dropped, silently, because
-    that is what a topic exchange does with an unroutable message.
-
-    Counts bound queues rather than checking for their mere presence: the
-    deployment's own modules are usually already subscribed to the same
-    topics, so "is anything bound to cltl.topic.text_in" would be answered
-    "yes" by somebody else's queue before this subscription even exists.
-    Waiting for the count to rise by one is what makes the check about *this*
-    subscription specifically. See
-    integration/src/cltl_integration/runner/compose.py:446-513, which this is
-    a single-runner-free reduction of.
-
-    **Only call this for a topic THIS bus is subscribing to for the first
-    time.** `KombuEventBus` keeps one consumer per topic — one queue, one
-    binding — and a second `subscribe` to a topic it is already consuming just
-    appends the handler to that consumer's list (`KombuEventBus.subscribe`). No
-    new queue is created, so the count cannot rise and this call can only ever
-    raise `TimeoutError` after the full timeout. The second handler is live the
-    moment `subscribe` returns; there is genuinely nothing to wait for.
-
-    `baseline` chooses WHICH question is being asked, and there are two:
-
-    * `None` (the default) snapshots the counts now and waits for them to RISE
-      — "is *my* subscription live", the question every `subscribe()` call
-      wants answered.
-    * `{}` — an all-zero baseline — turns the increment check into a PRESENCE
-      check: "is *anyone* bound to this key yet". That is the question to ask
-      before publishing to a subscriber that is not you, e.g. before opening a
-      scenario the tenant's chat UI has to receive. Same trick, same reason, as
-      `ComposeRunner.await_bindings(topics, {}, tenant)` in the platform's
-      harness (integration/src/cltl_integration/runner/tenants.py).
-
-    Without `management_url` (RabbitMQ's management plugin, default port
-    15672), there is no way to ask the broker anything, so this falls back to
-    a flat sleep and says so — the cheap version, usually enough, never
-    provably correct.
-
-    The management API needs credentials of its own. Pass `amqp_url` and they
-    are taken from it — the same user that is already authenticating the AMQP
-    connection is, in every deployment shipped here, also a management user.
-    Without it the fallback pair is the integration harness's, which is right
-    for that harness and wrong for every other broker: the mismatch surfaces
-    as a 401, and a 401 degrades this call to the flat sleep above rather than
-    failing, which is the quiet way to reintroduce the exact race this
-    function exists to close.
-    """
-    if not management_url:
-        logger.warning("No management_url given; sleeping 2s instead of "
-                       "confirming the binding. This is the cheap, unreliable "
-                       "fallback — see wait_until_bound's docstring.")
-        time.sleep(2.0)
-        return
-
-    parsed = urlparse(amqp_url) if amqp_url else None
-    auth = ((unquote(parsed.username or ""), unquote(parsed.password or ""))
-            if parsed and parsed.username else ("eliza", "eliza123"))
-
-    def counts():
-        url = f"{management_url}/api/exchanges/%2F/{EXCHANGE}/bindings/source"
-        try:
-            response = requests.get(url, auth=auth, timeout=5)
-            response.raise_for_status()
-        except requests.RequestException as e:
-            logger.warning("Could not reach the management API at %s (%s); "
-                           "falling back to a flat sleep.", url, e)
-            return None
-        result = {}
-        for binding in response.json():
-            key = binding["routing_key"]
-            result[key] = result.get(key, 0) + 1
-        return result
-
-    before = counts() if baseline is None else dict(baseline)
-    if before is None:
-        time.sleep(2.0)
-        return
-
-    wanted = {binding_key(topic, tenant): before.get(binding_key(topic, tenant), 0) + 1
-              for topic in topics}
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        current = counts() or {}
-        if all(current.get(key, 0) >= n for key, n in wanted.items()):
-            return
-        time.sleep(0.1)
-
-    raise TimeoutError(
-        f"RabbitMQ did not bind the expected queues within {timeout}s: {wanted}. "
-        f"A publish now would be silently dropped.")
+    return KombuEventBus(SERIALIZER, LocalConfigurationManager(parser))
 
 
 # ---------------------------------------------------------------------------
@@ -313,9 +193,8 @@ def wait_until_bound(management_url: Optional[str], topics: Iterable[str],
 # tenant's own bus. This template's deployment runs no cltl-context, so the
 # custom side has to open it. See docs/tenancy.md.
 #
-# A deliberate copy of integration/src/cltl_integration/drivers/scenario.py and
-# a parallel of src/myorg/tenant/scenario.py — rungs 1-2 have nothing installed,
-# which is the point of them.
+# A deliberate duplicate of src/myorg/tenant/scenario.py and service.py — rungs
+# 1-2 have nothing installed, which is the point of them.
 # ---------------------------------------------------------------------------
 
 AGENT_URI = "http://cltl.nl/leolani/world/leolani"
@@ -346,9 +225,10 @@ def start_scenario(event_bus: KombuEventBus, scenario_topic: str,
     `<scenario_topic>` key, which a tenanted chat UI does not bind, so the
     conversation would open for nobody — silently, as ever.
 
-    Call `wait_until_bound(..., baseline={})` for `scenario_topic` first: the
-    subscriber that has to receive this is the chat UI, not you, so the default
-    "wait for the count to rise" check would be answered by your own queue.
+    The subscriber that has to receive this is the chat UI, in another
+    container, so give it a moment: `time.sleep(5)` before this call, matching
+    what `[myorg.tenant] start_delay` budgets for the identical problem at rung
+    4. That is a guess, not a check — see docs/attaching.md.
     """
     scenario = new_scenario(scenario_id, **kwargs)
     event_bus.publish(scenario_topic,
@@ -406,13 +286,23 @@ def load_image(file_url: str, storage_url: str = DEFAULT_STORAGE_URL):
     requirements.notebook.txt). Parallel to `ExampleService._storage_loader`,
     which is the installed version of the same three lines.
 
-    If that import fails on a notebook whose venv demonstrably HAS cltl.backend,
-    the kernel is not the venv — `import sys; sys.executable` says which
-    interpreter you are actually on, and docs/gotchas.md says what to do about
-    it. Every cell above this one works either way, which is what makes the
-    symptom so misleading.
+    That import is also the one most likely to fail for a reason that is not a
+    missing install, so it reports the interpreter it failed on. Every cell
+    above this one needs only `cltl.combot` and `emissor`, which the wrong
+    environment usually also has — so a notebook whose kernel is not the venv
+    works perfectly right up to here and then fails on a package you can see is
+    installed. docs/gotchas.md says what to do about it.
     """
-    from cltl.backend.source.client_source import ClientImageSource
+    try:
+        from cltl.backend.source.client_source import ClientImageSource
+    except ImportError as e:
+        raise ImportError(
+            f"{e}. This is the first thing here that needs cltl.backend, so the "
+            f"usual cause is not a missing install but a kernel running on the "
+            f"wrong interpreter: this process is {sys.executable}. If that is "
+            f"not the venv you installed requirements.notebook.txt into, see "
+            f"docs/gotchas.md — everything above this point works either way, "
+            f"which is what makes the symptom so misleading.") from e
 
     with ClientImageSource(file_url, storage_url) as source:
         return source.capture().image
