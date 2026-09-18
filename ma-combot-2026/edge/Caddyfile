@@ -1,0 +1,83 @@
+# The public HTTP surface of the course server, which is one endpoint: the
+# image store. TLS and authentication live here rather than in the application,
+# because cltl-backend's storage service has neither and is not ours to change.
+#
+# Certificates are obtained automatically over ACME HTTP-01 for the single name
+# in $CLTL_HOSTNAME. One name is all this deployment needs, which is why a stock
+# caddy image is enough — wildcards would require a DNS-01 plugin and therefore
+# a custom xcaddy build. RabbitMQ reuses the same certificate; see
+# bin/sync-certs.sh.
+#
+# The chat UI is deliberately absent. Each student runs their own on their own
+# laptop, so it never needs a public route, a certificate, or a credential.
+{
+	email {$CLTL_ACME_EMAIL}
+	# Uncomment while testing, to use Let's Encrypt's staging CA and avoid
+	# burning rate limits on a name that is not finished yet.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$CLTL_HOSTNAME} {
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 20
+		}
+		format json
+	}
+
+	# ---------------------------------------------------------------------
+	# The image store.
+	#
+	# NOT stripped: the storage service is mounted at /storage inside its own
+	# container (DispatcherMiddleware), so `http://storage:8000/storage/image/x`
+	# is the real upstream path and this proxy must pass it through unchanged.
+	# `handle` rather than `handle_path` is what makes that so.
+	# ---------------------------------------------------------------------
+	handle /storage/* {
+		basic_auth {
+			import /etc/caddy/secrets/students.auth
+		}
+
+		# GET and HEAD are the notebook reading pixels (load_image) and
+		# cltl-monitoring doing the same. PUT is the student's own chat UI
+		# uploading them — it runs on their laptop now, so the write path
+		# crosses the internet and cannot simply be hidden. Everything else,
+		# including DELETE, is refused.
+		@disallowed not method GET HEAD PUT
+		respond @disallowed "Method not allowed" 405
+
+		# Matches [cltl.chat-ui] image_max_size in student/config. The upload
+		# is JSON with base64 pixels, so it is larger than the source file;
+		# the margin is deliberate.
+		request_body {
+			max_size 20MB
+		}
+
+		reverse_proxy storage:8000
+	}
+
+	# ---------------------------------------------------------------------
+	# The RabbitMQ management UI, for the INSTRUCTOR.
+	#
+	# Its own credential file, not the students'. Students are sent to the
+	# bindings screen by custom-module's documentation, so if you want to let
+	# them look, add a read-only RabbitMQ user and a second matcher here —
+	# do not hand out this one, which is an administrator.
+	#
+	# `management.path_prefix` in config/rabbitmq.conf is what makes the UI
+	# work under a path rather than at a host root; without it the page loads
+	# and every asset 404s.
+	# ---------------------------------------------------------------------
+	handle /rabbitmq/* {
+		basic_auth {
+			import /etc/caddy/secrets/admin.auth
+		}
+		reverse_proxy rabbitmq:15672
+	}
+
+	# Anything else, including the bare root, is not part of this deployment.
+	handle {
+		respond "ma-combot-2026: nothing is served here. See the course notes." 404
+	}
+}

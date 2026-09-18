@@ -1,0 +1,67 @@
+# YOUR tenant, on YOUR laptop.
+#
+#   cd ma-combot-2026/student
+#   cp .env.example .env && $EDITOR .env      # paste your connection sheet
+#   docker compose up -d
+#
+# Then open http://localhost:8000/chatui/static/chat.html — and note that it is
+# BLANK. Nothing is broken. A chat UI renders nothing until a conversation has
+# been opened for it, and in this deployment the thing that opens one is your
+# notebook, a few cells in. See custom-module/docs/tenancy.md.
+#
+# This is the only part of the course deployment that runs on your machine, and
+# it is here rather than on the server for two reasons. A chat UI has no login
+# and no per-browser session, so on a public port it would be open to anyone who
+# guessed it; and one per student on the server is thirty containers, thirty
+# ports and thirty certificates to keep working. On localhost it is none of
+# those things — the only person who can reach yours is you.
+#
+# Derived from custom-module/deployment/tenant.compose.yml. Four things differ,
+# and all four are about being somewhere else:
+#
+#   1. no `external` network — the server's Docker network is on the server
+#   2. CLTL_AMQP_URL is amqps:// with YOUR broker credentials, not a container
+#      name and a published password
+#   3. CLTL_STORAGE_URL goes through the course server's HTTPS endpoint, with
+#      YOUR storage credentials
+#   4. the chat UI port is just 8000, because your laptop is not shared
+
+name: ma-combot-2026-${CLTL_TENANT:?set CLTL_TENANT in .env to the tenant id on your connection sheet}
+
+services:
+  chatui:
+    image: ghcr.io/leolani/cltl-chat-ui:${CLTL_IMAGE_TAG:?set CLTL_IMAGE_TAG in .env to the tag on your connection sheet}
+    restart: unless-stopped
+    ports:
+      # Bound to loopback, not to 0.0.0.0. On a laptop on café wifi the
+      # difference is whether the room can join your conversation.
+      - "127.0.0.1:${CLTL_CHATUI_PORT:-8000}:8000"
+    volumes:
+      - ./config:/cltl-chatui/config:ro
+    environment:
+      # From your connection sheet. It carries your password, which is why this
+      # file reads it from .env rather than containing it: .env is gitignored.
+      #
+      # ?heartbeat=30 is not decoration. Close your laptop lid without it and
+      # the broker keeps your queue bound until TCP eventually gives up.
+      CLTL_AMQP_URL: ${CLTL_AMQP_URL:?set CLTL_AMQP_URL in .env}
+      # What makes this stack YOUR tenant, and the one value that must match
+      # the TENANT in your notebook. A mismatch is silent: the chat UI publishes
+      # on one routing key and your notebook listens on another, so you type and
+      # nothing happens, with no error anywhere.
+      CLTL_TENANT: ${CLTL_TENANT:?set CLTL_TENANT in .env}
+      # Where the chat UI PUTs the pixels of an image you upload, so that the
+      # `cltl-storage:image/<id>` reference it publishes resolves for your
+      # notebook too. The trailing slash is load-bearing (urljoin), and the
+      # credentials are yours.
+      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:?set CLTL_STORAGE_URL in .env}
+      # Empty: cltl-monitoring is not part of this course deployment, and an
+      # empty value leaves the Monitoring tab out of the page altogether, which
+      # is better than a tab whose iframe cannot load.
+      CLTL_MONITORING_URL: ""
+      CLTL_LOGGING_CONFIG: /cltl-chatui/config/logging.config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

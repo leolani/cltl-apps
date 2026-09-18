@@ -1,0 +1,17 @@
+# One line per student: student id, tenant id, broker username.
+#
+# Passwords are NOT here. bin/provision.sh generates them, writes the broker
+# users and the caddy credential files under secrets/, and leaves one connection
+# sheet per student under sheets/. Both directories are gitignored.
+#
+# The tenant id becomes one word of an AMQP routing key, so it must match
+# ^[a-z0-9][a-z0-9_-]*$ — no dots, no `*`, no `#`. provision.sh checks it, which
+# is the check that rungs 1-2 of the template do not do for themselves.
+#
+# Student id is only ever used for file names and the access log, so make it
+# something you can read at a glance in a log line at 2am.
+#
+# student,tenant,broker_user
+alice,tenant-alice,alice
+bob,tenant-bob,bob
+carol,tenant-carol,carol

@@ -1,0 +1,174 @@
+# The course server: four containers, whatever the class size.
+#
+#   cd ma-combot-2026
+#   cp .env.example .env && $EDITOR .env
+#   docker compose -f server.compose.yml up -d
+#
+# Derived from custom-module/deployment/server.compose.yml, which is the version
+# to read first: its comments explain WHY each service is shaped as it is. This
+# file only records what a permanently running, publicly reachable host needs
+# that a laptop demo does not. See docs/plans/classroom-deployment.md.
+#
+# There is no chat UI here and no tenant stack of any kind. Each student runs
+# their own on their own laptop (student/compose.yml) — which is what keeps this
+# file the same size for 3 students or 300, and what keeps the chat UI, which
+# has neither authentication nor a per-browser session, off the public internet.
+#
+# Exactly two things are reachable from outside this host:
+#   * the broker, on 5671, TLS, one RabbitMQ user per student
+#   * the image store, through caddy on 443, one HTTP credential per student
+# Everything else binds loopback and is reached over the compose network or by
+# way of an SSH session.
+
+name: ma-combot-2026
+
+services:
+  rabbitmq:
+    # 4.1, where custom-module's demo pins 3.12. That series is END OF LIFE and
+    # receives no security updates, which is survivable on a laptop for an
+    # afternoon and not on a public host for a term. Verified: this config file
+    # is accepted unchanged by 4.1, the TLS listener comes up, and the
+    # management path prefix below answers 200.
+    image: rabbitmq:4.1-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${CLTL_ADMIN_USER:?set CLTL_ADMIN_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${CLTL_ADMIN_PASS:?set CLTL_ADMIN_PASS in .env}
+      RABBITMQ_DEFAULT_VHOST: /
+    ports:
+      # 5671 (AMQPS) is the ONLY broker port on a public interface. 5672 is
+      # published on loopback for `rabbitmqctl` and for debugging from an SSH
+      # session; it must never gain a public binding, because plaintext AMQP
+      # would carry every student's password in the clear.
+      - "5671:5671"
+      - "127.0.0.1:5672:5672"
+      # The management UI is reached through caddy, with its own credentials.
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - ./config/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      # Where bin/sync-certs.sh puts a copy of the certificate caddy obtained,
+      # owned by a uid the broker can read. Caddy's own data directory is not
+      # mounted here on purpose — see that script.
+      - ./secrets/tls:/etc/rabbitmq/tls:ro
+      # Durable, unlike the demo's: users, permissions and policies are created
+      # once by bin/provision.sh and must survive a restart.
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - cltl
+
+  storage:
+    image: ghcr.io/leolani/cltl-backend:${CLTL_IMAGE_TAG:?pin a version tag in .env, never :latest}
+    # storage_main.py, NOT main.py: StorageContainer alone, no microphone,
+    # camera or text-to-speech. custom-module/deployment/server.compose.yml
+    # explains at length why the default entry point is unsafe on a shared bus.
+    command: ["python", "src/storage_main.py"]
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      # Loopback only. The public route is caddy, which adds TLS, a credential,
+      # a method allow-list and a body limit. Published at all so that an
+      # operator on an SSH session can curl it without going through caddy.
+      - "127.0.0.1:8002:8000"
+    volumes:
+      - ./config/server:/cltl-backend/config:ro
+      # Read-write, and the only bind mount that is: uploaded pixels land here.
+      # Nothing in cltl-backend ever deletes them — bin/prune-images.sh is what
+      # keeps this from filling the disk, and a full disk here trips RabbitMQ's
+      # disk alarm and blocks publishing for the whole class.
+      - ./storage:/cltl-backend/storage
+    environment:
+      CLTL_AMQP_URL: amqp://${CLTL_ADMIN_USER}:${CLTL_ADMIN_PASS}@rabbitmq:5672/
+      # Empty, and declared rather than defaulted: StorageService never touches
+      # the bus, but InfraContainer builds one anyway, and an UNDEFINED variable
+      # arrives as the literal string "$CLTL_TENANT".
+      CLTL_TENANT: ""
+      CLTL_LOGGING_CONFIG: /cltl-backend/config/logging.config
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    logging: *logging
+    networks:
+      - cltl
+
+  eliza:
+    image: ghcr.io/leolani/cltl-eliza:${CLTL_IMAGE_TAG:?pin a version tag in .env, never :latest}
+    restart: unless-stopped
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./config/server:/cltl-eliza/config:ro
+    environment:
+      CLTL_AMQP_URL: amqp://${CLTL_ADMIN_USER}:${CLTL_ADMIN_PASS}@rabbitmq:5672/
+      # EMPTY: this is the shared, untenanted half. It binds `<topic>.#` and
+      # serves every student; its replies carry source=event, so an untenanted
+      # bus routes them back to the tenant that asked. See docs/tenancy.md in
+      # custom-module.
+      CLTL_TENANT: ""
+      CLTL_LOGGING_CONFIG: /cltl-eliza/config/logging.config
+    healthcheck:
+      # src/main.py serves /health on 8000 (werkzeug run_simple). The demo has
+      # no healthcheck here, which is tolerable for an afternoon and not for a
+      # term: eliza is the single process behind every student's SECOND reply,
+      # so its death reads as "my listener stopped working" to thirty people at
+      # once. docs/known-issues.md says so in the students' own words.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    logging: *logging
+    networks:
+      - cltl
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      storage:
+        condition: service_healthy
+    ports:
+      # 80 is required for the ACME HTTP-01 challenge and for the redirect to
+      # 443. Both are public; nothing else here is.
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Generated by bin/provision.sh from the roster: one bcrypt line per
+      # student, plus the instructor's management-UI credential.
+      - ./secrets/caddy:/etc/caddy/secrets:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - ./logs/caddy:/var/log/caddy
+    environment:
+      CLTL_HOSTNAME: ${CLTL_HOSTNAME:?set CLTL_HOSTNAME in .env, e.g. combot.example.org}
+      CLTL_ACME_EMAIL: ${CLTL_ACME_EMAIL:?set CLTL_ACME_EMAIL in .env}
+    logging: *logging
+    networks:
+      - cltl
+
+volumes:
+  rabbitmq-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  cltl:
+    name: ma-combot-2026
+    driver: bridge

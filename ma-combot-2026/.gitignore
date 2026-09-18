@@ -1,0 +1,12 @@
+# Per-student credentials and the certificate copy the broker reads. Generated
+# by bin/provision.sh and bin/sync-certs.sh; never committed.
+/secrets/
+# Uploaded pixels and container logs, both of which grow without bound until
+# bin/prune-images.sh and the json-file log rotation do their work.
+/storage/image/*
+/storage/audio/*
+/logs/
+# The operator's own host-specific values.
+/.env
+# Generated per-student connection sheets.
+/sheets/
