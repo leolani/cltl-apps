@@ -144,8 +144,11 @@ services:
       storage:
         condition: service_healthy
     ports:
-      # 80 is required for the ACME HTTP-01 challenge and for the redirect to
-      # 443. Both are public; nothing else here is.
+      # 80 carries the ACME HTTP-01 challenge and nothing else: the Caddyfile
+      # turns the HTTP->HTTPS redirect off, because every client here sends
+      # basic credentials and a redirect would let a mistyped http:// URL leak
+      # one in clear text and still succeed. Close 80 entirely if you would
+      # rather rely on TLS-ALPN-01 alone — see edge/Caddyfile.
       - "80:80"
       - "443:443"
     volumes:

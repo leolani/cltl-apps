@@ -56,6 +56,18 @@ fixed.
   for some time.
 - `connect.py`: 418 → 308 lines.
 
+Added alongside, after an investigation prompted by the same work:
+
+- **The notebook's cleanup cell can no longer strand an open bus.** The scenario
+  close is in a `try` and `scenario` is looked up through `globals()`, so a
+  kernel that never ran the scenario cell — or one whose close publish fails —
+  still reaches the loop that closes every bus. An open bus is exactly what
+  keeps a kernel from shutting down, so a teardown that can raise before
+  reaching it was the one shape that cell must not have.
+- **A `gotchas.md` entry for the stale scenario left by a process that dies**,
+  with the check (`GET /chatui/chat/scenario`, deliberately side-effect free)
+  and the cure.
+
 ## What was decided, and why
 
 **A sleep rather than a fixed binding check.** The check was correct and it
@@ -157,6 +169,10 @@ End to end, against `deployment/server.compose.yml` plus one `tenant-a` stack:
 The sleeps were sufficient every time: no event was lost in any run, including
 the three-bus cell's six fresh consumer threads behind a single two-second wait.
 
+The cleanup cell's two failure paths were exercised directly with a fake bus:
+with `scenario` undefined, and with the close publish raising. Both close every
+bus.
+
 **The image path was not exercised end to end** — it needs a picture uploaded
 through the chat UI, and `load_image` is unchanged here apart from the
 `ImportError` wrapper, which is unit-tested.
@@ -174,6 +190,14 @@ through the chat UI, and `load_image` is unchanged here apart from the
 - **A dict/string `ConfigurationManager` factory in `cltl.combot`**, which could
   also delete the integration harness's `_TenantConfigurationManager` — the same
   partial-`Configuration` wart this change removed from here.
+- **Any expiry for an abandoned scenario.** Nothing in the platform has one:
+  `ChatUiService` clears its scenario id only on a `ScenarioStopped`,
+  `[cltl.chat-ui] timeout` is a browser-session timeout that delegates to a
+  `cltl-context` this deployment does not run, and cltl-monitoring's
+  `active_interval` expires recording rather than the scenario. Left alone
+  deliberately: re-opening takes over cleanly, so the gap is documented rather
+  than filled. Filling it would mean a TTL or heartbeat in `cltl-chat-ui`, and
+  a behavioural change — ending conversations nobody asked to end.
 - **Per-instance DI singletons.** `DIContainer._singletons` being process-global
   is why the container route is unavailable to a notebook holding three buses.
   Fixing it properly reaches every component in the platform.

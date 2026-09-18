@@ -12,6 +12,20 @@
 # laptop, so it never needs a public route, a certificate, or a credential.
 {
 	email {$CLTL_ACME_EMAIL}
+
+	# Port 80 stays open for ONE reason: the ACME HTTP-01 challenge. It is not
+	# strictly required — TLS-ALPN-01 runs entirely over 443 and caddy falls
+	# back to it — but a second route to a certificate is worth having on a host
+	# that renews unattended for a term. Let's Encrypt has had to disable
+	# TLS-ALPN-01 before now.
+	#
+	# What port 80 must NOT do here is redirect. Every client of this deployment
+	# sends HTTP basic credentials, so a storage URL mistyped as http:// would
+	# put a password on the wire in clear text and then be redirected with a 308
+	# — which preserves the method, so the request SUCCEEDS. It works, and
+	# nobody notices the leak. With redirects off, that same mistake gets a 404
+	# and is fixed the same afternoon.
+	auto_https disable_redirects
 	# Uncomment while testing, to use Let's Encrypt's staging CA and avoid
 	# burning rate limits on a name that is not finished yet.
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory

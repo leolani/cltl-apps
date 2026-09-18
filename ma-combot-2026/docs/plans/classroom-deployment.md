@@ -314,7 +314,13 @@ laptop-versus-server difference, not a defect in the original.
     any of these usefully — every symptom looks like their own laptop.
 23. Write down the reset procedures: restart `eliza`, prune the image store,
     reissue a student's credentials.
-24. Rehearse with three fake students end to end before week one, including one
+24. **Rehearse a reboot before the term**, and make the daemon survive one.
+    `restart: unless-stopped` is worth nothing if `dockerd` is not enabled at
+    boot, it cannot recreate containers removed by a `down`, and `depends_on` is
+    not replayed at boot — so the stack comes back in an arbitrary order and
+    settles. The systemd timers need enabling too; written unit files do
+    nothing. docs/operator.md carries the drill and the checks.
+25. Rehearse with three fake students end to end before week one, including one
     off-campus laptop on bad wifi.
 
 ## What was decided, and why
