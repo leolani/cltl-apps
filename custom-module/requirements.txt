@@ -1,16 +1,7 @@
 .[service]
 pytest
-# Named here even though it now arrives anyway, as a dependency of
-# cltl.backend[impl] (see setup.py). What uses it DIRECTLY is attach/connect.py
-# (rungs 1-2), to poll RabbitMQ's management API, and tests/test_examples.py,
-# which imports that module — neither of which goes through the installed
-# distribution at all. Relying on a transitive dependency for a direct import is
-# how a venv breaks the day someone empties [myorg.example] topic_image and
-# drops cltl.backend with it.
-requests
 
-# The Docker image (Dockerfile, rung 4) uses requirements.docker.txt instead
-# of this file: it resolves entirely offline from the first-party sdist
-# registry plus whatever the base image preinstalls, and neither pytest nor
-# requests is available that way. See requirements.docker.txt and
-# docs/docker.md.
+# The Docker image uses requirements.docker.txt instead of this file: it
+# resolves entirely offline from the first-party sdist registry plus whatever
+# the base image preinstalls, and pytest is not available that way. See
+# requirements.docker.txt.

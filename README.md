@@ -1,176 +1,81 @@
-# CLTL Apps
+# cltl-apps
 
-A collection of conversational AI applications built using the CLTL (Computational Lexicology & Terminology Lab) framework. This repository demonstrates the modular, event-driven architecture of the CLTL framework through complete application examples for building communication robots and interactive agents.
+Deployment stacks for the Leolani conversational-agent platform, assembled
+from published `ghcr.io/leolani/cltl-*` images — plus a template for
+attaching your own code to one.
 
-## Overview
-
-Each application in this repository showcases how to compose sophisticated conversational agents from modular CLTL components. The apps share a common architecture with pluggable components for:
-
-- **Speech processing**: Automatic Speech Recognition (ASR), Voice Activity Detection (VAD)
-- **Conversational AI**: Dialogue management with different implementations
-- **Multimodal interaction**: Text and voice-based interfaces
-- **Data storage**: EMISSOR framework for structured multimodal interaction data
-- **Flexible deployment**: Local Python applications or Docker Compose with distributed messaging
-
-## Applications
-
-### [Eliza App](eliza-app/)
-
-A conversational AI application implementing the classic ELIZA chatbot with modern speech recognition capabilities.
-
-**Key Features:**
-- Pattern-based conversation using the `cltl-eliza` component
-- Classic ELIZA-style responses with rule-based matching
-- Voice and text input support
-- Serves as a simple introduction to the CLTL framework
-
-**Use Case:** Educational demonstrations, testing the framework, simple rule-based conversations
-
-[Read the full documentation →](eliza-app/README.md)
-
-### [LLM App](llm-app/)
-
-A sophisticated conversational AI application powered by Large Language Models (LLMs) including Llama and Qwen.
-
-**Key Features:**
-- Natural, context-aware conversations using the `cltl-llm` component
-- Support for multiple LLM backends (Ollama, local GGUF models)
-- Configurable system prompts, temperature, and conversation history
-- Advanced dialogue capabilities with state-of-the-art language models
-
-**Use Case:** Advanced conversational agents, research applications, production deployments requiring natural language understanding
-
-[Read the full documentation →](llm-app/README.md)
-
-## Architecture
-
-Both applications share the same modular, event-driven architecture:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Interaction Layer                    │
-│              (Voice Input / Web Chat Interface)              │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      Event Bus Layer                         │
-│          (In-Memory or RabbitMQ Distributed)                │
-└─────────────────────────────────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        ▼                   ▼                   ▼
-    ┌─────────┐      ┌──────────┐      ┌──────────────┐
-    │   ASR   │      │   VAD    │      │ Conversational│
-    │ (Speech)│      │  (Voice) │      │    Module     │
-    └─────────┘      └──────────┘      └──────────────┘
-                                              │
-                                        ┌─────┴─────┐
-                                        ▼           ▼
-                                    ┌────────┐  ┌─────┐
-                                    │ Eliza  │  │ LLM │
-                                    └────────┘  └─────┘
-```
-
-**The key difference:**
-- **Eliza App** uses pattern-based responses (`cltl-eliza`)
-- **LLM App** uses language models for natural conversations (`cltl-llm`)
-
-## Quick Start
-
-Each application can be run in two ways:
-
-### Local Python Application (Development)
-```bash
-cd eliza-app/py-app    # or llm-app/py-app
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python app.py
-```
-
-### Docker Compose (Production)
-```bash
-cd eliza-app/docker-app    # or llm-app/docker-app
-docker-compose up --build
-```
-
-See individual app READMEs for detailed setup instructions and configuration options.
-
-## Requirements
-
-- **Python**: 3.8 to 3.10
-- **System Libraries**: portaudio, libsndfile, ffmpeg (for audio processing)
-- **Docker**: (Optional) For containerized deployment
-- **LLM Models**: (For llm-app only) Ollama or local GGUF model files
-
-See individual app READMEs for complete prerequisites and installation instructions.
-
-## Repository Structure
+## Layout
 
 ```
 cltl-apps/
-├── eliza-app/           # ELIZA-based conversational app
-│   ├── py-app/          # Local Python application
-│   ├── docker-app/      # Docker Compose deployment
-│   └── README.md        # Detailed documentation
-│
-├── llm-app/             # LLM-powered conversational app
-│   ├── py-app/          # Local Python application
-│   ├── docker-app/      # Docker Compose deployment
-│   └── README.md        # Detailed documentation
-│
-└── README.md            # This file
+├── clients/          user-facing stacks — one set per tenant
+│   ├── backend/       proxies the host's microphone/camera server
+│   ├── context/       opens/closes a tenant's conversation scenario
+│   └── chat-ui/       the web chat UI
+├── servers/          shared platform stacks — one instance for every tenant
+│   ├── broker/         RabbitMQ + the platform network
+│   ├── eliza/          storage API + the ELIZA dialogue engine
+│   ├── vad-asr/        voice activity detection + speech recognition
+│   └── emissor/        EMISSOR interaction-data capture + REST API
+├── custom-module/    template: attach your own code via the event bus
+├── config/            shared configuration, mounted by every stack above
+├── storage/           shared persisted data, mounted by every stack above
+└── doc/               architecture overview and the deployment guide
 ```
 
-## Contributing
+Every stack under `servers/` and `clients/` is a separate Docker Compose
+file, invoked together with `-f`, sharing this repository's root `config/`
+and `storage/` directories. **Start here:**
+[`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) — checkout, configuration, and every
+stack-selection command, including running more than one tenant at once.
 
-Contributions are welcome! Each application follows the coding conventions outlined in their respective `CLAUDE.md` files. When contributing:
+[`doc/LEOLANI.md`](doc/LEOLANI.md) is the narrative architecture overview of
+the platform and its agent variants — read that first if you want the "why"
+before the "how".
 
-1. Follow Clean Code principles
-2. Maintain consistency with existing code style
-3. Update documentation for any new features
-4. Test both local and Docker deployments
+## Quick start (one tenant, everything on one machine)
 
-## Related Projects
+```bash
+# 1. the shared platform half
+docker compose -f servers/broker/docker-compose.yml up -d --wait
+docker compose -f servers/broker/docker-compose.yml \
+                -f servers/eliza/docker-compose.yml \
+                -f servers/vad-asr/docker-compose.yml \
+                -f servers/emissor/docker-compose.yml up -d --wait
 
-- [CLTL Combot Framework](https://github.com/leolani/cltl-combot) - Core framework for building conversational agents
-- [CLTL LLM Module](https://github.com/leolani/cltl-llm) - LLM integration for the CLTL framework
-- [EMISSOR Framework](https://github.com/leolani/emissor) - Multimodal interaction data representation
-- [Leolani Platform](https://github.com/leolani) - Complete conversational robot platform
+# 2. host microphone server (outside Docker — a container has no microphone)
+cd clients/backend && ./run_host_server.sh &
+cd ../..
 
-## License
-
-Distributed under the MIT License. See individual app LICENSE files for more information.
-
-## Authors
-
-- [Taewoon Kim](https://tae898.github.io/)
-- [Thomas Baier](https://www.linkedin.com/in/thomas-baier-05519030/)
-- [Selene Báez Santamaría](https://selbaez.github.io/)
-- [Piek Vossen](https://github.com/piekvossen)
-
-## Citation
-
-If you use these applications or the EMISSOR framework in your research, please cite:
-```bibtex
-@article{baier2025modular,
-  title={A modular architecture for creating multimodal embodied agents with an episodic Knowledge Graph as an explainable and controllable long-term memory},
-  author={Baier, Thomas and Santamar{\'\i}a, Selene B{\'a}ez and Vossen, Piek},
-  journal={Dialogue \& Discourse},
-  volume={16},
-  number={3},
-  pages={25--59},
-  year={2025}
-}
+# 3. this tenant's client half (servers/broker must already be up — do not
+#    re-list it here: its project name differs from the client stacks', and
+#    Compose would try to re-create the already-running rabbitmq container)
+CLTL_TENANT=tenant-a CLTL_BACKEND_PORT=9001 CLTL_CHATUI_PORT=8003 \
+    docker compose -f clients/backend/docker-compose.yml \
+                    -f clients/context/docker-compose.yml \
+                    -f clients/chat-ui/docker-compose.yml up -d --wait
 ```
 
-```bibtex
-@inproceedings{emissor:2021,
-    title = {EMISSOR: A platform for capturing multimodal interactions as Episodic Memories and Interpretations with Situated Scenario-based Ontological References},
-    author = {Selene Baez Santamaria and Thomas Baier and Taewoon Kim and Lea Krause and Jaap Kruijt and Piek Vossen},
-    url = {https://mmsr-workshop.github.io/programme},
-    booktitle = {Proceedings of the MMSR workshop "Beyond Language: Multimodal Semantic Representations", IWSC2021},
-    year = {2021}
-}
-```
+Chat UI: <http://localhost:8003/chatui/static/chat.html> — answer the agent's
+opening consent question before anything else, or nothing responds.
+
+| Port | Service |
+|---|---|
+| 5672 / 15672 | RabbitMQ AMQP / management UI (`eliza` / `eliza123`) |
+| 8001 | Storage REST API (servers/eliza) |
+| 8002 | EMISSOR data API (servers/emissor) |
+| 9001 | This tenant's client backend API (`CLTL_BACKEND_PORT`) |
+| 8003 | This tenant's chat UI (`CLTL_CHATUI_PORT`) |
+| 8000 | Host microphone server (`leoserv`, on the host, not in Docker) |
+
+`VERSION=<tag> docker compose pull` pins images; default is `:latest`. A
+second tenant runs the same step-3 command with different `CLTL_TENANT` and
+port values — see [`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for multi-tenant
+and partial-stack (server-only, client-only) invocations.
+
+## Attaching your own code
+
+[`custom-module/`](custom-module/) is a minimal template demonstrating event
+bus subscription/publishing with correct tenant-id handling — the pattern to
+copy for adding custom processing to a running deployment. It attaches to an
+already-running deployment; it does not build one.

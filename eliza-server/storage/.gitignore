@@ -1,7 +1,0 @@
-*
-*/
-!audio/
-!.gitignore
-!audio/
-audio/*
-!audio/.gitkeep

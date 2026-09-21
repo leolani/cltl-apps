@@ -1,0 +1,30 @@
+# EMISSOR interaction-data capture + REST API — untenanted, shared by every
+# tenant. Needs servers/broker running first, same rule as servers/eliza:
+#
+#   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait
+
+name: cltl-platform
+
+services:
+  eliza-emissor:
+    image: ghcr.io/leolani/cltl-emissor-data:${VERSION:-latest}
+    container_name: eliza-emissor
+    ports:
+      - "8002:8000"
+    volumes:
+      - ../../config/default.config:/cltl-emissor-data/config/default.config:ro
+      - ../../config/custom.config:/cltl-emissor-data/config/custom.config:ro
+      - ../../config/logging.config:/cltl-emissor-data/config/logging.config:ro
+      - ../../storage:/cltl-emissor-data/storage
+    environment:
+      - CLTL_LOGGING_CONFIG=/cltl-emissor-data/config/logging.config
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    external: true

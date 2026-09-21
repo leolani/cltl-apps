@@ -1,0 +1,51 @@
+# One tenant's backend: proxies the host machine's microphone/camera server
+# (leoserv — see run_host_server.sh, which cannot run in Docker: a container
+# has no microphone) into the platform's storage and event bus.
+#
+# Needs servers/broker running first (joins `cltl-platform` as an external
+# network) and a leoserv instance reachable at host.docker.internal:8000 (or
+# override [cltl.backend] server_image_url/server_audio_url in
+# config/custom.config for a leoserv on a different host).
+#
+# Tenanted: run once per tenant, with a distinct CLTL_TENANT and host port:
+#
+#   ./run_host_server.sh &   # leoserv, on the host, once per physical client
+#   CLTL_TENANT=tenant-a CLTL_BACKEND_PORT=9001 \
+#       docker compose -f docker-compose.yml up -d --wait
+#
+# Do NOT also list servers/broker/docker-compose.yml here once broker is
+# already running: this stack's project name differs from broker's, so
+# Compose would try to re-create the already-running rabbitmq container and
+# fail with a container-name conflict.
+
+name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+
+services:
+  backend:
+    image: ghcr.io/leolani/cltl-backend:${VERSION:-latest}
+    restart: "no"
+    ports:
+      - "${CLTL_BACKEND_PORT:?set a distinct host port per tenant, e.g. 9001 for tenant-a and 9002 for tenant-b}:8000"
+    volumes:
+      - ../../config/default.config:/cltl-backend/config/default.config:ro
+      - ./config/custom.config:/cltl-backend/config/custom.config:ro
+      - ../../config/logging.config:/cltl-backend/config/logging.config:ro
+      - ../../storage:/cltl-backend/storage
+    environment:
+      - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+      - CLTL_LOGGING_CONFIG=/cltl-backend/config/logging.config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    external: true

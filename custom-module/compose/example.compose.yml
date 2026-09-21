@@ -1,33 +1,28 @@
 # One service, joined to ONE TENANT of a Leolani deployment that is ALREADY
 # RUNNING.
 #
-# This is not a copy of integration/compose/docker-compose.yml and must not
-# become one — that file IS a deployment; this file attaches to one, which is
-# what a third-party module actually does. See docs/docker.md.
+# Written against a cltl-apps checkout: bring up the root servers/broker (and
+# whichever servers/* stacks the deployment needs) and one tenant's
+# clients/context first, then this container joins the SAME network as any
+# other tenant-scoped service:
 #
-# Usage against the deployment in deployment/, started with:
+#   docker compose -f ../../servers/broker/docker-compose.yml \
+#                   -f ../../servers/eliza/docker-compose.yml up -d --wait
+#   CLTL_TENANT=tenant-a docker compose -f ../../clients/context/docker-compose.yml up -d --wait
 #
-#   docker compose -f deployment/server.compose.yml up -d
-#   CLTL_TENANT=tenant-a CLTL_CHATUI_PORT=8000 \
-#       docker compose -f deployment/tenant.compose.yml up -d
-#
-# then:
-#
-#   export CLTL_DEMO_CONFIG=$PWD/deployment/config/tenant
+#   export CLTL_DEMO_CONFIG=$PWD/../../clients/context/config
 #   CLTL_TENANT=tenant-a docker compose -f compose/example.compose.yml up
 #
 # Run it once per tenant — the project name interpolates CLTL_TENANT, so
-# tenant-a's module and tenant-b's module coexist. The NETWORK you join is the
-# server's and is the same for every tenant; what makes this container tenant-a
-# is CLTL_TENANT and nothing else. That is worth sitting with: the isolation is
-# a routing key, not a network boundary. See docs/tenancy.md.
+# tenant-a's module and tenant-b's module coexist. The NETWORK you join
+# (`cltl-platform`, created by servers/broker) is the platform's and is the
+# same for every tenant; what makes this container tenant-a is CLTL_TENANT
+# and nothing else. The isolation is a routing key, not a network boundary —
+# see ../../doc/DEPLOYMENT.md#tenancy.
 #
-# Against the integration harness's demo stacks instead, the network name is
-# randomised and the broker credentials are eliza/eliza123:
-#
-#   export CLTL_SERVER_NETWORK=$(docker network ls --format '{{.Name}}' | grep '^cltl-it-.*_cltl$')
-#
-# See docs/docker.md for both, including which file the volume below mounts.
+# Against a different deployment entirely, point CLTL_SERVER_NETWORK,
+# CLTL_AMQP_URL and CLTL_STORAGE_URL at its own broker/network/storage
+# instead — nothing below is cltl-apps-specific except the defaults.
 
 name: cltl-example-module-${CLTL_TENANT:?set CLTL_TENANT to the tenant this module serves, e.g. tenant-a}
 
@@ -37,58 +32,46 @@ services:
     environment:
       # Container-side view: `rabbitmq` is a service name on the deployment's
       # own compose network, not the 127.0.0.1:<published-port> URL a process
-      # outside that network uses (see attach/connect.py for that one).
-      CLTL_AMQP_URL: ${CLTL_AMQP_URL:-amqp://leolani:leolani@rabbitmq:5672/}
+      # outside that network uses.
+      CLTL_AMQP_URL: ${CLTL_AMQP_URL:-amqp://eliza:eliza123@rabbitmq:5672/}
       # Where `cltl-storage:image/<id>` resolves. REAL, not a placeholder: this
       # module fetches the pixels of every image signal it sees, and
       # [myorg.example] image_storage_url refuses an empty or unexpanded value.
-      # Container-side view of the server's storage service, and the trailing
-      # slash is load-bearing — the reference is resolved with urljoin(), which
-      # drops the last path segment of a base without one.
-      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:-http://storage:8000/storage/}
+      # Container-side view of servers/eliza's storage service, and the
+      # trailing slash is load-bearing — the reference is resolved with
+      # urljoin(), which drops the last path segment of a base without one.
+      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:-http://eliza-backend:8000/storage/}
       # $VAR interpolation happens at config READ time. Every variable the
-      # deployment's custom.config might interpolate has to be defined here,
-      # even empty — an unset one is passed through as the literal string and
-      # only warned about, never failed on. Same list, same reason, as
-      # x-cltl-env in integration/compose/docker-compose.yml. These two are
-      # genuinely unused here: no microphone, no loudspeaker.
+      # mounted custom.config might interpolate has to be defined here, even
+      # empty — an unset one is passed through as the literal string and only
+      # warned about, never failed on.
       CLTL_AUDIO_URL: ""
       CLTL_TTS_URL: ""
-      # Read by the tenant config's [cltl.chat-ui] monitoring_url, which this
-      # container does not use — but the file is mounted whole, and an undefined
-      # variable in a section nobody reads is still a warning per read.
-      CLTL_MONITORING_URL: ""
-      # REQUIRED, not defaulted like the three above. This module opens its
-      # tenant's scenario, and an untenanted publish lands on a bare routing
-      # key that no tenanted chat UI binds — so an empty value here would leave
-      # that tenant's chat UI blank forever with nothing logged. myorg.tenant
-      # refuses to start on an empty or unexpanded value; compose refuses even
-      # earlier, at interpolation.
+      # This is the whole demonstration: an empty value here makes the module
+      # answer every tenant; setting it scopes it to exactly one.
       CLTL_TENANT: "${CLTL_TENANT:?set CLTL_TENANT to the tenant this module serves, e.g. tenant-a}"
     volumes:
       # One FILE, not the directory every platform module mounts over its own
       # config/. The deployment's config carries [cltl.event] implementation:
-      # kombu and the broker address — every module in that deployment shares
-      # it — but it has no [myorg.example] or [myorg.tenant] section, because
-      # the deployment does not know about this template. This image's own
-      # config/default.config supplies both (see the Dockerfile), so only the
-      # connection overlay needs to come from outside, and it lands on
-      # custom.config because the loader reads that as an overlay ON TOP of
-      # default.config.
+      # kombu and the broker address — every service in that deployment shares
+      # it — but it has no [myorg.example] section, because the deployment
+      # does not know about this template. This image's own config/default.config
+      # supplies it (see the Dockerfile), so only the connection overlay needs
+      # to come from outside, and it lands on custom.config because the loader
+      # reads that as an overlay ON TOP of default.config.
       #
-      # Source is deployment/config/tenant/default.config: the TENANT half, not
-      # the server half — it is the one that carries `tenant: $CLTL_TENANT`.
-      # A deployment that instead generates a custom.config (as the platform's
-      # own test harness does) needs that name here instead. See docs/docker.md.
-      - ${CLTL_DEMO_CONFIG:?set to the running deployment's tenant config directory, e.g. $PWD/deployment/config/tenant}/default.config:/cltl-example/config/custom.config:ro
+      # Source is a clients/*/config directory: any of them carries the
+      # [cltl.event.kombu] tenant: $CLTL_TENANT line this module also needs —
+      # see clients/context/config/custom.config for the canonical one.
+      - ${CLTL_DEMO_CONFIG:?set to a running clients/* stack's config directory, e.g. ../../clients/chat-ui/config}/custom.config:/cltl-example/config/custom.config:ro
     networks:
       - server
     restart: "no"
 
 networks:
   server:
-    # The SERVER's network, created by deployment/server.compose.yml and shared
-    # by every tenant. Joining it is how this container reaches the broker; it
-    # is not what scopes it to a tenant.
-    name: ${CLTL_SERVER_NETWORK:-cltl-example}
+    # The platform's network, created by servers/broker and shared by every
+    # tenant and every servers/* stack. Joining it is how this container
+    # reaches the broker; it is not what scopes it to a tenant.
+    name: ${CLTL_SERVER_NETWORK:-cltl-platform}
     external: true

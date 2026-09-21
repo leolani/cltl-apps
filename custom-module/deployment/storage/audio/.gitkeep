@@ -1,9 +1,0 @@
-This directory must exist before the storage service starts, and nothing creates
-it at runtime — same reason as ./image/.gitkeep, which has the details.
-
-Nothing in this deployment records audio: there is no microphone and no ASR.
-The directory is here because StorageContainer builds BOTH stores eagerly
-(cltl-backend/src/cltl_service/backend/storage_container.py) — asking it for
-`storage_service` constructs `audio_storage` too — so [cltl.backend]
-audio_storage_path has to point somewhere that exists even though nothing will
-ever be written to it.

@@ -1,0 +1,44 @@
+# Voice activity detection + speech recognition — untenanted, shared by every
+# tenant. Needs servers/broker running first, same rule as servers/eliza:
+#
+#   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait
+
+name: cltl-platform
+
+services:
+  eliza-vad:
+    image: ghcr.io/leolani/cltl-vad:${VERSION:-latest}
+    container_name: eliza-vad
+    volumes:
+      - ../../config/default.config:/cltl-vad/config/default.config:ro
+      - ../../config/custom.config:/cltl-vad/config/custom.config:ro
+      - ../../config/logging.config:/cltl-vad/config/logging.config:ro
+      - ../../storage:/cltl-vad/storage
+    environment:
+      - CLTL_LOGGING_CONFIG=/cltl-vad/config/logging.config
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cltl-platform
+
+  eliza-asr:
+    image: ghcr.io/leolani/cltl-asr:${VERSION:-latest}
+    container_name: eliza-asr
+    volumes:
+      - ../../config/default.config:/cltl-asr/config/default.config:ro
+      - ../../config/custom.config:/cltl-asr/config/custom.config:ro
+      - ../../config/logging.config:/cltl-asr/config/logging.config:ro
+      - ../../storage:/cltl-asr/storage
+    environment:
+      - CLTL_LOGGING_CONFIG=/cltl-asr/config/logging.config
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    external: true

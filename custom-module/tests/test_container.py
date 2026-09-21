@@ -10,13 +10,11 @@ from cltl.combot.event.emissor import ImageSignalEvent, TextSignalEvent
 from emissor.representation.scenario import TextSignal
 
 from myorg.example.container import ExampleContainer
-from myorg.tenant.container import TenantContainer
 from tests.support import (DictConfigurationManager, fake_image_loader, image_signal,
                            pixels)
 
 INPUT_TOPIC = "cltl.topic.text_in"
 OUTPUT_TOPIC = "cltl.topic.text_out"
-SCENARIO_TOPIC = "cltl.topic.scenario"
 IMAGE_TOPIC = "cltl.topic.image"
 IMAGE_URL = "cltl-storage:image/image-1"
 
@@ -129,96 +127,6 @@ class ContainerLifecycleTest(unittest.TestCase):
                 "scenario-1", ImageSignalEvent.create(signal)))
 
             self.assertIn("700x640", self.replies.get(timeout=1).payload.signal.text)
-
-
-class _InProcessTenantContainer(TenantContainer, ExampleContainer):
-    """The component PLUS the scenario a tenant needs — what src/main.py composes.
-
-    `TenantContainer` first, which is what puts `tenant_service.start()` last:
-    start order is the reverse of the bases tuple. See ApplicationContainer in
-    src/main.py for the full trace.
-    """
-
-    def __init__(self, bus: SynchronousEventBus):
-        self._bus = bus
-
-    @property
-    def config_manager(self):
-        return DictConfigurationManager({
-            "myorg.example": {
-                "topic_input": INPUT_TOPIC,
-                "topic_output": OUTPUT_TOPIC,
-            },
-            "myorg.tenant": {
-                "topic_scenario": SCENARIO_TOPIC,
-                "start_scenario": "True",
-                # Never sleep in a test. It would be skipped anyway — the guard
-                # is on shared_bus, and this bus is in-process.
-                "start_delay": "0",
-            },
-            "cltl.event": {
-                "implementation": "internal",
-            },
-        })
-
-    @property
-    def event_bus(self):
-        return self._bus
-
-
-class TenantContainerLifecycleTest(unittest.TestCase):
-    def setUp(self):
-        _reset_singletons()
-        self.bus = SynchronousEventBus()
-        self.container = _InProcessTenantContainer(self.bus)
-
-        self.scenario_events = []
-        # Record what was subscribed AT THE MOMENT each scenario event arrived.
-        # That is the ordering assertion: asserting only that both events show
-        # up would pass with the bases in either order.
-        self.bus.subscribe(SCENARIO_TOPIC, lambda e: self.scenario_events.append(
-            (e.payload.type, INPUT_TOPIC in self.bus.topics)))
-
-        self.replies = Queue()
-        self.bus.subscribe(OUTPUT_TOPIC, self.replies.put)
-
-    def test_the_scenario_opens_after_the_component_has_subscribed(self):
-        with self.container:
-            kind, example_was_subscribed = self.scenario_events[0]
-
-            self.assertEqual("ScenarioStarted", kind)
-            # TenantContainer.start calls super().start() — and therefore
-            # ExampleContainer's — before its own service. Swap the bases and
-            # this is False: the scenario would be announced to a component that
-            # had not yet subscribed.
-            self.assertTrue(example_was_subscribed)
-
-    def test_the_scenario_closes_before_the_component_goes_away(self):
-        with self.container:
-            pass
-
-        kind, example_still_subscribed = self.scenario_events[-1]
-
-        self.assertEqual("ScenarioStopped", kind)
-        # stop() unwinds in the reverse order, so the scenario is closed while
-        # the rest of the deployment is still standing.
-        self.assertTrue(example_still_subscribed)
-
-    def test_the_component_still_works_alongside_it(self):
-        with self.container:
-            signal = TextSignal.for_scenario("scenario-1", timestamp_now(), timestamp_now(), None, "hello")
-            self.bus.publish(INPUT_TOPIC, Event.for_payload(TextSignalEvent.for_speaker(signal)))
-
-            self.assertIn("HELLO", self.replies.get(timeout=1).payload.signal.text)
-
-    def test_singleton_accessor_is_prefixed(self):
-        members = dir(TenantContainer)
-
-        self.assertIn("tenant_service", members)
-        self.assertNotIn("service", members)
-        # No `scenario` accessor: it is per-start() state, and a @singleton
-        # holding it would hand a second run the first run's scenario id.
-        self.assertNotIn("scenario", members)
 
 
 if __name__ == "__main__":

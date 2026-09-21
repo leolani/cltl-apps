@@ -1,5 +1,0 @@
-cltl.combot[external] @ git+https://github.com/leolani/cltl-combot.git@aa4bf0bb494ac74b77232310554ad99b306f183f
-emissor @ git+https://github.com/cltl/EMISSOR.git@177757956a8719294f849d65567116b87a6d352f
-
-flask
-requests

@@ -1,0 +1,56 @@
+# The storage service and the ELIZA dialogue engine — untenanted, shared by
+# every tenant on the platform. Needs servers/broker running first (this file
+# joins `cltl-platform` as an external network and depends on the `rabbitmq`
+# service being healthy, which only resolves when broker's file is part of
+# the same invocation):
+#
+#   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait
+
+name: cltl-platform
+
+services:
+  eliza-backend:
+    image: ghcr.io/leolani/cltl-backend:${VERSION:-latest}
+    command: ["python", "src/storage_main.py"]
+    container_name: eliza-backend
+    ports:
+      - "8001:8000"    # Storage API — exposed for remote clients
+    volumes:
+      - ../../config/default.config:/cltl-backend/config/default.config:ro
+      - ../../config/custom.config:/cltl-backend/config/custom.config:ro
+      - ../../config/logging.config:/cltl-backend/config/logging.config:ro
+      - ../../storage:/cltl-backend/storage
+    environment:
+      - CLTL_LOGGING_CONFIG=/cltl-backend/config/logging.config
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    networks:
+      - cltl-platform
+
+  eliza-eliza:
+    image: ghcr.io/leolani/cltl-eliza:${VERSION:-latest}
+    container_name: eliza-eliza
+    volumes:
+      - ../../config/default.config:/cltl-eliza/config/default.config:ro
+      - ../../config/custom.config:/cltl-eliza/config/custom.config:ro
+      - ../../config/logging.config:/cltl-eliza/config/logging.config:ro
+      - ../../storage:/cltl-eliza/storage
+    environment:
+      - CLTL_LOGGING_CONFIG=/cltl-eliza/config/logging.config
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    external: true

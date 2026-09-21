@@ -8,7 +8,6 @@ from cltl.combot.infra.di_container import singleton
 from cltl.combot.infra.event.api import Event, PAYLOAD
 from cltl.combot.infra.event.memory import SynchronousEventBus
 from myorg.example.container import ExampleContainer
-from myorg.tenant.container import TenantContainer
 from emissor.representation.util import marshal, unmarshal, register_type_var
 from flask import Flask
 from werkzeug.middleware.dispatcher import DispatcherMiddleware
@@ -38,34 +37,15 @@ def deserializer(obj):
     return unmarshal(obj, cls=Event)
 
 
-class ApplicationContainer(TenantContainer, ExampleContainer):
-    """This deployment: the component, plus the scenario a tenant needs.
-
-    `TenantContainer` comes FIRST, and the reason is start ordering rather than
-    the event bus. Start order is the reverse of the bases tuple, so:
-
-        TenantContainer.start -> super().start() -> ExampleContainer.start
-            -> super().start() (infra) -> example_service.start()
-        -> back in TenantContainer: tenant_service.start()
-
-    i.e. `ScenarioStarted` is published LAST, once this process's own subscriber
-    is up, and `stop()` mirrors it — `ScenarioStopped` goes out FIRST, while the
-    bus is still alive. Swapping the bases would announce the scenario before
-    `ExampleService` had subscribed; harmless today, since nothing here consumes
-    the scenario topic, but the wrong thing to teach.
-
-    The separate rule that the bus-selecting base must come first applies to a
-    container synthesised with an EMPTY class body — see `HarnessInfraContainer`
-    in integration/src/cltl_integration/runner/inprocess.py, which explains why
-    (`KombuEventBusContainer.event_bus` is a plain, non-@singleton property, so
-    whichever base reaches it first through the MRO decides). Here `event_bus`
-    is defined in this class's own body, so it wins over every base regardless
-    of their order.
-
-    `myorg.tenant` is not part of this component and is meant to be deleted —
-    see myorg/tenant/scenario.py and docs/tenancy.md. Deleting it means dropping
-    `TenantContainer` from the bases above and nothing else; `ExampleContainer`
-    has no knowledge of it.
+class ApplicationContainer(ExampleContainer):
+    """This deployment: just the component. Scenario creation is not this
+    template's job — it is the platform's own cltl-context, one per tenant,
+    running in the deployment this module attaches to (see
+    ../../clients/context in a cltl-apps checkout, or the equivalent in
+    whatever deployment mounts this image). A standalone template used to
+    carry its own throwaway scenario opener for exactly the deployments that
+    had no cltl-context of their own; against this platform there always is
+    one, so there is nothing to compose here beyond `ExampleContainer`.
     """
 
     @property

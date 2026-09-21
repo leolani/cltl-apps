@@ -1,10 +1,15 @@
 # Copy this to config/custom.config (gitignored — never commit it) to point
-# rung 3 at a real deployment's broker instead of the in-process default, as
-# one tenant of it.
+# the standalone `python src/main.py` at a real deployment's broker instead of
+# the in-process default, as one tenant of it. Written against a cltl-apps
+# checkout's root servers/+clients/ stacks (see ../../doc/DEPLOYMENT.md); the
+# ports below are servers/eliza's (storage on 8001) and clients/chat-ui's
+# tenant port, reached from OUTSIDE the `cltl-platform` Docker network.
 #
+#   docker compose -f ../../servers/broker/docker-compose.yml \
+#                   -f ../../servers/eliza/docker-compose.yml up -d --wait
 #   cp config/custom.config.example config/custom.config
-#   CLTL_AMQP_URL=amqp://leolani:leolani@127.0.0.1:5672/ CLTL_TENANT=tenant-a \
-#       CLTL_STORAGE_URL=http://127.0.0.1:8002/storage/ \
+#   CLTL_AMQP_URL=amqp://eliza:eliza123@127.0.0.1:5672/ CLTL_TENANT=tenant-a \
+#       CLTL_STORAGE_URL=http://127.0.0.1:8001/storage/ \
 #       venv/bin/python src/main.py
 #
 # CLTL_STORAGE_URL is where `cltl-storage:image/<id>` resolves — the address of
@@ -13,21 +18,17 @@
 # refuses to start on an empty or unexpanded value while topic_image is set.
 # Empty [myorg.example] topic_image in this file instead to run text-only.
 #
-# CLTL_TENANT is NOT optional and must NOT be empty. This component opens the
-# tenant's scenario (see [myorg.tenant] in config/default.config), and an
-# untenanted bus publishes on the bare 'cltl.topic.scenario' routing key, which
-# no tenanted chat UI binds — the scenario would reach nobody and the chat UI
-# would stay blank forever. myorg.tenant refuses to start rather than let that
-# happen; set [myorg.tenant] start_scenario to false if something else opens
-# the scenario for this tenant.
+# CLTL_TENANT is what this section demonstrates: tenant id handling. Left
+# empty, this module binds `<topic>.#` and answers every tenant on the
+# exchange — correct only for a single-tenant deployment. Scenario creation is
+# NOT this module's job against this platform: a real `cltl-context` (e.g.
+# clients/context, one per tenant) opens it.
 #
 # $VAR interpolation happens at READ time (EnvInterpolation, in
 # cltl.combot.infra.config.local), not when this file is parsed. An *unset*
 # variable is passed through as the literal string "$CLTL_TENANT" with only a
 # logger.warning, and KombuEventBus then treats that literal as a real tenant
-# name and binds a real, valid, permanently empty queue. That refusal at
-# startup is the only thing standing between you and a deployment that is
-# entirely healthy and connected to nothing. See docs/tenancy.md.
+# name and binds a real, valid, permanently empty queue.
 
 [cltl.event]
 implementation: kombu

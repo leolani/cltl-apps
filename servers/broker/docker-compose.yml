@@ -1,0 +1,40 @@
+# The shared, untenanted half of the platform: the broker every servers/* and
+# clients/* stack talks through, on one network. Start this FIRST — every
+# other stack under servers/ and clients/ declares `cltl-platform` as an
+# EXTERNAL network and refuses to start without it.
+#
+#   docker compose -f servers/broker/docker-compose.yml up -d --wait
+#
+# `name:` is shared verbatim across every servers/* compose file, so bringing
+# several of them up together in one `-f ... -f ...` invocation (see
+# ../../doc/DEPLOYMENT.md) merges them into a single compose project and lets
+# `depends_on: condition: service_healthy` resolve across files.
+
+name: cltl-platform
+
+services:
+  rabbitmq:
+    image: "rabbitmq:3.12-management"
+    container_name: rabbitmq
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"    # AMQP — exposed for remote clients
+      - "15672:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=eliza
+      - RABBITMQ_DEFAULT_PASS=eliza123
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - ../../storage/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    driver: bridge

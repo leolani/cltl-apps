@@ -1,0 +1,37 @@
+# One tenant's web chat UI.
+#
+# Needs servers/broker running first, and clients/backend for the SAME
+# tenant up and healthy. Do NOT also list servers/broker/docker-compose.yml
+# here — see clients/context/docker-compose.yml's header for why.
+#
+#   CLTL_TENANT=tenant-a CLTL_CHATUI_PORT=8003 \
+#       docker compose -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait
+
+name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+
+services:
+  chatui:
+    image: ghcr.io/leolani/cltl-chat-ui:${VERSION:-latest}
+    restart: "no"
+    ports:
+      - "${CLTL_CHATUI_PORT:?set a distinct host port per tenant, e.g. 8003 for tenant-a and 8004 for tenant-b}:8000"
+    volumes:
+      - ../../config/default.config:/cltl-chatui/config/default.config:ro
+      - ./config/custom.config:/cltl-chatui/config/custom.config:ro
+      - ../../config/logging.config:/cltl-chatui/config/logging.config:ro
+      - ../../storage:/cltl-chatui/storage
+    environment:
+      - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+      - CLTL_LOGGING_CONFIG=/cltl-chatui/config/logging.config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    external: true
