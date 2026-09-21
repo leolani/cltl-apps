@@ -1,0 +1,28 @@
+# For custom-module/attach/example.ipynb only — deliberately independent of
+# requirements.txt / the offline cltl-requirements mirror. This notebook
+# attaches to an already-running cltl-apps deployment (see
+# ../doc/DEPLOYMENT.md) with nothing checked out but this repository, so its
+# dependencies install straight from GitHub instead of needing a cltl-dev
+# checkout with `make build` already run.
+#
+# Pinned to the same commits cltl-dev's own submodules currently point at
+# (all three are on branch ref_scenarios there) — re-check with
+# `git -C cltl-dev submodule status` before bumping, since drifting from what
+# cltl-dev actually builds is exactly the trap ../CLAUDE.md warns about
+# ("Pinned source != the source in cltl-dev").
+#
+# emissor's setup.py still declares `namespace_packages=['emissor']`, a
+# pkg_resources-era API that only resolves cleanly under Python 3.10 — use
+# that interpreter for this venv, not a newer one.
+git+https://github.com/leolani/emissor.git@ref_scenarios
+cltl.combot[external] @ git+https://github.com/leolani/cltl-combot.git@ref_scenarios
+# For one class, ClientImageSource — the platform's client for the image
+# storage service, used to resolve a `cltl-storage:image/<id>` reference into
+# pixels. Pulls in `requests` transitively.
+cltl.backend[impl] @ git+https://github.com/leolani/cltl-backend.git@ref_scenarios
+requests
+kombu
+
+# Not a dependency of the notebook itself — installed separately alongside
+# this file (`pip install -r requirements.notebook.txt jupyterlab`) so a
+# lockstep version bump here doesn't also churn Jupyter's own pin.

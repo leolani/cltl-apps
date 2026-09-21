@@ -78,4 +78,6 @@ and partial-stack (server-only, client-only) invocations.
 [`custom-module/`](custom-module/) is a minimal template demonstrating event
 bus subscription/publishing with correct tenant-id handling — the pattern to
 copy for adding custom processing to a running deployment. It attaches to an
-already-running deployment; it does not build one.
+already-running deployment; it does not build one. The fastest way to see it
+live is [`custom-module/custom-module.ipynb`](custom-module/custom-module.ipynb),
+a notebook that connects to one tenant's bus cell by cell.

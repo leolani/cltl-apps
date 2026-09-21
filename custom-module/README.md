@@ -86,16 +86,38 @@ template used to carry a throwaway scenario-opener for deployments that had
 none of their own; against this platform there always is one, so
 `src/main.py` composes nothing beyond the one container below.
 
-## Two ways to run it
+## Three ways to run it
 
 | | You run | You get | You need |
 |---|---|---|---|
+| **Notebook** | `custom-module.ipynb` | An interactive, cell-by-cell look at subscribing and publishing on the bus | a Python 3.10 venv, `pip install -r requirements.notebook.txt jupyterlab`, and a full tenant already running (see below) |
 | **Component** | `src/main.py` | A packaged, tested, installable module, run standalone against a real deployment's broker | a Python 3.10 venv, `pip install -r requirements.txt` |
 | **Container** | `compose/example.compose.yml` | Runs inside the deployment like any platform module | `../servers/broker` (+ whichever `servers/*` the deployment needs) and one tenant's `../clients/context` already running |
 
-Both levels attach to an **already-running** deployment — this repository
+All three attach to an **already-running** deployment — this repository
 builds no deployment of its own. See
 [`../doc/DEPLOYMENT.md`](../doc/DEPLOYMENT.md) for bringing one up.
+
+### Notebook
+
+The notebook attaches to a tenant's **already-open** conversation — it does
+not open or close a scenario itself, since that is `../clients/context`'s
+job (see "What this template is" above). Bring up a full tenant first —
+`../servers/broker` (+ whichever `../servers/*` the deployment needs) and
+one tenant's `../clients/backend` + `../clients/context` + `../clients/chat-ui`
+— then:
+
+```bash
+python3.10 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.notebook.txt jupyterlab
+python -m ipykernel install --user --name cltl-example --display-name "cltl-example (.venv)"
+
+jupyter lab custom-module.ipynb
+```
+
+Pick the `cltl-example (.venv)` kernel when the notebook opens, and run the
+cells top to bottom — each one explains, in order, subscribing, publishing a
+tenant-correct reply, a second modality, and proving tenant isolation.
 
 ### Component
 
