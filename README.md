@@ -42,11 +42,16 @@ docker compose -f servers/broker/docker-compose.yml \
                 -f servers/eliza/docker-compose.yml \
                 -f servers/vad-asr/docker-compose.yml \
                 -f servers/emissor/docker-compose.yml up -d --wait
+```
 
+```bash
 # 2. host microphone server (outside Docker — a container has no microphone)
 cd clients/backend && ./run_host_server.sh &
 cd ../..
 
+```
+
+```bash
 # 3. this tenant's client half (servers/broker must already be up — do not
 #    re-list it here: its project name differs from the client stacks', and
 #    Compose would try to re-create the already-running rabbitmq container)
