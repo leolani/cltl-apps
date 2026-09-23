@@ -1,6 +1,8 @@
 *
 */
 !.gitignore
+!image/
+!image/.gitkeep
 !audio/
 !audio/.gitkeep
 !rabbitmq/
