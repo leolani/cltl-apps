@@ -35,8 +35,8 @@ before the "how".
 
 ## Quick start (one tenant, everything on one machine)
 
-```bash
 # 1. the shared platform half
+```bash
 docker compose -f servers/broker/docker-compose.yml up -d --wait
 docker compose -f servers/broker/docker-compose.yml \
                 -f servers/eliza/docker-compose.yml \
@@ -44,17 +44,17 @@ docker compose -f servers/broker/docker-compose.yml \
                 -f servers/emissor/docker-compose.yml up -d --wait
 ```
 
-```bash
 # 2. host microphone server (outside Docker — a container has no microphone)
+```bash
 cd clients/backend && ./run_host_server.sh &
 cd ../..
 
 ```
 
-```bash
 # 3. this tenant's client half (servers/broker must already be up — do not
 #    re-list it here: its project name differs from the client stacks', and
 #    Compose would try to re-create the already-running rabbitmq container)
+```bash
 CLTL_TENANT=tenant-a CLTL_BACKEND_PORT=9001 CLTL_CHATUI_PORT=8003 \
     docker compose -f clients/backend/docker-compose.yml \
                     -f clients/context/docker-compose.yml \
