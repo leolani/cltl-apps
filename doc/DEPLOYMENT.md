@@ -63,6 +63,13 @@ what `$CLTL_TENANT` interpolation is for.
 `config/custom.config` (root) is for changes that should apply to *every*
 stack — a platform-wide ASR model change, for example.
 
+Separately, `config/servers.env` and `config/clients.env` are **Docker
+Compose** variable files (`--env-file`), not app config — they supply the
+`CLTL_TENANT`/host-port values a compose command interpolates before a
+container ever starts, as opposed to `default.config`/`custom.config`, which
+are read by the running container itself. See
+[Bringing up stacks](#bringing-up-stacks).
+
 ## Tenancy
 
 The deployment is multi-tenant: one shared `servers/` half serves several
@@ -87,9 +94,9 @@ routing key each side binds: `cltl.topic.text_in.tenant-a` against
 network — separation is cooperative (a routing key), not enforced.
 
 A tenant id is one lowercase routing-key word (`^[a-z0-9][a-z0-9_-]*$`) — set
-it via `CLTL_TENANT` on every `clients/*` command for that tenant, and give
-each tenant its own `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT` so their published
-host ports don't collide.
+it via `CLTL_TENANT` in `config/clients.env` (or a per-tenant copy of it) for
+that tenant, and give each tenant its own `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT`/
+`CLTL_MONITORING_PORT` so their published host ports don't collide.
 
 `servers/*` stacks never set a tenant: they are the shared half, and setting
 one would scope, say, `servers/eliza`'s ELIZA to a single tenant's traffic
@@ -102,7 +109,8 @@ Every command below assumes the repository root as the working directory.
 ### Just the servers (no client, e.g. for `custom-module` development)
 
 ```bash
-docker compose -f servers/broker/docker-compose.yml \
+docker compose --env-file config/servers.env \
+                -f servers/broker/docker-compose.yml \
                 -f servers/eliza/docker-compose.yml \
                 -f servers/vad-asr/docker-compose.yml \
                 -f servers/emissor/docker-compose.yml up -d --wait
@@ -111,41 +119,71 @@ docker compose -f servers/broker/docker-compose.yml \
 Any subset of `servers/eliza`, `servers/vad-asr`, `servers/emissor` works,
 as long as `servers/broker` is included in the same invocation — the others
 depend on `rabbitmq` being healthy, which Compose can only resolve for a
-service defined in the same merged project.
+service defined in the same merged project. `config/servers.env` currently
+has nothing required in it — every `servers/*` image tag already defaults to
+`:latest` — it exists so pinning `VERSION` is one edit instead of an inline
+env var on every command; `--env-file` works the same with nothing set.
 
 ### One tenant, full stack
 
 `servers/broker` must already be running (its network is `external: true` to
 every other stack). **Do not** also list `servers/broker/docker-compose.yml`
-in the command below: none of `clients/backend`, `clients/context` or
-`clients/chat-ui` `depends_on` the `rabbitmq` service directly (only
-`servers/eliza`, `servers/vad-asr` and `servers/emissor` do, which is why
-broker's file belongs in *that* command above), and a client stack's project
-name (`cltl-platform-client-<tenant>`) differs from broker's (`cltl-platform`)
-— Compose would try to re-create the already-running `rabbitmq` container
-under the client project and fail with a container-name conflict.
+in the command below: none of `clients/backend`, `clients/context`,
+`clients/chat-ui` or `clients/monitoring` `depends_on` the `rabbitmq` service
+directly (only `servers/eliza`, `servers/vad-asr` and `servers/emissor` do,
+which is why broker's file belongs in *that* command above), and a client
+stack's project name (`cltl-platform-client-<tenant>`) differs from broker's
+(`cltl-platform`) — Compose would try to re-create the already-running
+`rabbitmq` container under the client project and fail with a
+container-name conflict.
 
 ```bash
 cd clients/backend && ./run_host_server.sh &   # host mic server; skip for text-only
 cd ../..
 
-CLTL_TENANT=tenant-a CLTL_BACKEND_PORT=9001 CLTL_CHATUI_PORT=8003 \
-    docker compose -f clients/backend/docker-compose.yml \
-                    -f clients/context/docker-compose.yml \
-                    -f clients/chat-ui/docker-compose.yml up -d --wait
+docker compose --env-file config/clients.env \
+    -f clients/backend/docker-compose.yml \
+    -f clients/context/docker-compose.yml \
+    -f clients/chat-ui/docker-compose.yml \
+    -f clients/monitoring/docker-compose.yml up -d --wait
 ```
 
 `clients/context` and `clients/chat-ui` still `depends_on: backend:
 condition: service_healthy` — that resolves because `clients/backend`'s
-service (named `backend`) is defined in this same three-file invocation.
+service (named `backend`) is defined in this same invocation.
+`clients/monitoring` has no `depends_on` of its own; it only needs
+`servers/broker`/`servers/eliza` already running, same as the other three.
+`config/clients.env` carries `CLTL_TENANT` and every published port for this
+tenant — edit it (or use a copy, see below) rather than passing those inline.
+
+### Monitoring
+
+`clients/monitoring` is a per-scenario view (image, transcript, detected
+faces) that `clients/chat-ui`'s Monitoring tab embeds via an iframe — part of
+the command above by default. To run without it, drop
+`-f clients/monitoring/docker-compose.yml` from the command and comment out
+`CLTL_MONITORING_URL` in `config/clients.env` (an empty/unset value leaves the
+tab out, which is safer than one whose iframe can't load because
+`clients/monitoring` isn't actually running).
+
+`CLTL_MONITORING_URL` must be a bare origin (`http://localhost:<CLTL_MONITORING_PORT>`,
+no path) reachable from the browser, not the compose service name — the chat
+UI frontend appends the page path itself — and kept in sync with
+`CLTL_MONITORING_PORT` by hand, since Compose env files don't expand other
+variables within themselves.
 
 ### A second tenant, same host
 
+Copy `config/clients.env` (e.g. to `config/clients-tenant-b.env`) and edit
+`CLTL_TENANT`, `CLTL_BACKEND_PORT`, `CLTL_CHATUI_PORT`, `CLTL_MONITORING_PORT`
+and `CLTL_MONITORING_URL` to distinct values, then:
+
 ```bash
-CLTL_TENANT=tenant-b CLTL_BACKEND_PORT=9002 CLTL_CHATUI_PORT=8004 \
-    docker compose -f clients/backend/docker-compose.yml \
-                    -f clients/context/docker-compose.yml \
-                    -f clients/chat-ui/docker-compose.yml up -d --wait
+docker compose --env-file config/clients-tenant-b.env \
+    -f clients/backend/docker-compose.yml \
+    -f clients/context/docker-compose.yml \
+    -f clients/chat-ui/docker-compose.yml \
+    -f clients/monitoring/docker-compose.yml up -d --wait
 ```
 
 Distinct `CLTL_TENANT`, distinct host ports, same servers/ half. Each
@@ -177,15 +215,29 @@ machine.
 
 **Chat UI shows no responses** — confirm `servers/*` is running and healthy
 (`docker compose -f servers/broker/docker-compose.yml ... ps`), and that this
-tenant's `CLTL_TENANT` matches across `clients/backend`, `clients/context`
-and `clients/chat-ui` — a mismatch means a reply is published on a routing
-key nothing is listening on. Check RabbitMQ's management UI
-(<http://localhost:15672>, `eliza`/`eliza123`) for traffic on the
-`cltl.combot` exchange.
+tenant's `CLTL_TENANT` (in `config/clients.env`) matches across
+`clients/backend`, `clients/context` and `clients/chat-ui` — a mismatch means
+a reply is published on a routing key nothing is listening on. Check
+RabbitMQ's management UI (<http://localhost:15672>, `eliza`/`eliza123`) for
+traffic on the `cltl.combot` exchange.
 
 **No voice detection** — confirm `run_host_server.sh` (or `leoserv`) is
 running on the host and reachable at `http://localhost:8000/health`, and that
 `[cltl.backend.mic] topic` is set in `clients/backend/config/custom.config`.
 
 **Port already allocated** — another tenant, or a previous run, is using
-that `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT`. Pick a distinct pair per tenant.
+that `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT`/`CLTL_MONITORING_PORT` in
+`config/clients.env`. Give each tenant its own copy with a distinct set.
+
+**"no such file" from `--env-file`** — you passed `--env-file
+config/clients.env` (or `config/servers.env`) from somewhere other than the
+repository root, or renamed/moved the file. Compose refuses to start rather
+than silently continuing with nothing set; re-run from the repository root or
+fix the path.
+
+**Monitoring tab missing or blank** — confirm `clients/monitoring` was
+included in the `up` command and is healthy for this tenant, and that
+`CLTL_MONITORING_URL` is uncommented in `config/clients.env` as a bare,
+browser-reachable origin (`http://localhost:<CLTL_MONITORING_PORT>`, no path)
+matching that same file's `CLTL_MONITORING_PORT` — commented out or
+mismatched leaves the tab out rather than showing an error.

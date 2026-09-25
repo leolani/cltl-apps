@@ -4,8 +4,8 @@
 # tenant up and healthy. Do NOT also list servers/broker/docker-compose.yml
 # here — see clients/context/docker-compose.yml's header for why.
 #
-#   CLTL_TENANT=tenant-a CLTL_CHATUI_PORT=8003 \
-#       docker compose -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait
+#   docker compose --env-file ../../config/clients.env \
+#       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait
 
 name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
 
@@ -23,6 +23,9 @@ services:
     environment:
       - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
       - CLTL_LOGGING_CONFIG=/cltl-chatui/config/logging.config
+      # Set via CLTL_MONITORING_URL in ../../config/clients.env (commented
+      # out there by default, which leaves this tab out).
+      - CLTL_MONITORING_URL=${CLTL_MONITORING_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

@@ -11,14 +11,17 @@ cltl-apps/
 ├── clients/          user-facing stacks — one set per tenant
 │   ├── backend/       proxies the host's microphone/camera server
 │   ├── context/       opens/closes a tenant's conversation scenario
-│   └── chat-ui/       the web chat UI
+│   ├── chat-ui/       the web chat UI
+│   └── monitoring/    per-scenario view, shown as a chat-ui tab
 ├── servers/          shared platform stacks — one instance for every tenant
 │   ├── broker/         RabbitMQ + the platform network
 │   ├── eliza/          storage API + the ELIZA dialogue engine
 │   ├── vad-asr/        voice activity detection + speech recognition
 │   └── emissor/        EMISSOR interaction-data capture + REST API
 ├── custom-module/    template: attach your own code via the event bus
-├── config/            shared configuration, mounted by every stack above
+├── config/            shared app config (mounted by every stack) plus
+│                        servers.env/clients.env, the docker compose --env-file
+│                        variables for the commands below
 ├── storage/           shared persisted data, mounted by every stack above
 └── doc/               architecture overview and the deployment guide
 ```
@@ -38,7 +41,8 @@ before the "how".
 ```bash
 # 1. the shared platform half
 docker compose -f servers/broker/docker-compose.yml up -d --wait
-docker compose -f servers/broker/docker-compose.yml \
+docker compose --env-file config/servers.env \
+                -f servers/broker/docker-compose.yml \
                 -f servers/eliza/docker-compose.yml \
                 -f servers/vad-asr/docker-compose.yml \
                 -f servers/emissor/docker-compose.yml up -d --wait
@@ -49,11 +53,13 @@ cd ../..
 
 # 3. this tenant's client half (servers/broker must already be up — do not
 #    re-list it here: its project name differs from the client stacks', and
-#    Compose would try to re-create the already-running rabbitmq container)
-CLTL_TENANT=tenant-a CLTL_BACKEND_PORT=9001 CLTL_CHATUI_PORT=8003 \
-    docker compose -f clients/backend/docker-compose.yml \
-                    -f clients/context/docker-compose.yml \
-                    -f clients/chat-ui/docker-compose.yml up -d --wait
+#    Compose would try to re-create the already-running rabbitmq container).
+#    CLTL_TENANT and the published ports come from config/clients.env.
+docker compose --env-file config/clients.env \
+    -f clients/backend/docker-compose.yml \
+    -f clients/context/docker-compose.yml \
+    -f clients/chat-ui/docker-compose.yml \
+    -f clients/monitoring/docker-compose.yml up -d --wait
 ```
 
 Chat UI: <http://localhost:8003/chatui/static/chat.html> — answer the agent's
@@ -66,12 +72,16 @@ opening consent question before anything else, or nothing responds.
 | 8002 | EMISSOR data API (servers/emissor) |
 | 9001 | This tenant's client backend API (`CLTL_BACKEND_PORT`) |
 | 8003 | This tenant's chat UI (`CLTL_CHATUI_PORT`) |
+| 8005 | This tenant's monitoring view (`CLTL_MONITORING_PORT`) |
 | 8000 | Host microphone server (`leoserv`, on the host, not in Docker) |
 
 `VERSION=<tag> docker compose pull` pins images; default is `:latest`. A
-second tenant runs the same step-3 command with different `CLTL_TENANT` and
-port values — see [`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for multi-tenant
-and partial-stack (server-only, client-only) invocations.
+second tenant runs the same step-3 command with a copy of `config/clients.env`
+holding different `CLTL_TENANT` and port values — see
+[`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for multi-tenant and partial-stack
+(server-only, client-only) invocations, and its
+[monitoring section](doc/DEPLOYMENT.md#monitoring) for dropping
+`clients/monitoring` (the chat UI's Monitoring tab) if you don't want it.
 
 ## Attaching your own code
 

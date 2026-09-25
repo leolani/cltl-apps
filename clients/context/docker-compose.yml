@@ -9,8 +9,8 @@
 # rabbitmq container and fail with a container-name conflict — and neither
 # service below depends_on rabbitmq directly, only on clients/backend.
 #
-#   CLTL_TENANT=tenant-a \
-#       docker compose -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait
+#   docker compose --env-file ../../config/clients.env \
+#       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait
 
 name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
 

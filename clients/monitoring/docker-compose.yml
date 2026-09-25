@@ -1,0 +1,48 @@
+# One tenant's monitoring view: a per-scenario page (image, transcript,
+# detected faces) that clients/chat-ui's Monitoring tab can embed.
+#
+# Optional and independent — it does not depend_on clients/backend, only on
+# servers/broker (external `cltl-platform` network) and servers/eliza's
+# storage being reachable, same as every other clients/* stack assumes.
+#
+#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait
+#
+# Reads CLTL_TENANT and CLTL_MONITORING_PORT from ../../config/clients.env —
+# see that file, or make a copy for a second tenant.
+#
+# To also show this in clients/chat-ui's Monitoring tab, uncomment and set
+# CLTL_MONITORING_URL in that same config/clients.env (bare origin, no path —
+# the chat UI frontend appends /static/monitoring.html itself), and add this
+# file's `-f` alongside clients/chat-ui's own command. Leaving it commented
+# out/empty leaves the tab out.
+#
+# Do NOT also list servers/broker/docker-compose.yml here once broker is
+# already running: this stack's project name differs from broker's, so
+# Compose would try to re-create the already-running rabbitmq container and
+# fail with a container-name conflict.
+
+name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+
+services:
+  monitoring:
+    image: ghcr.io/leolani/cltl-monitoring:${VERSION:-latest}
+    restart: "no"
+    ports:
+      - "${CLTL_MONITORING_PORT:?set a distinct host port per tenant, e.g. 8005 for tenant-a and 8006 for tenant-b}:8000"
+    volumes:
+      - ../../config/default.config:/cltl-monitoring/config/default.config:ro
+      - ./config/custom.config:/cltl-monitoring/config/custom.config:ro
+      - ../../config/logging.config:/cltl-monitoring/config/logging.config:ro
+      - ../../storage:/cltl-monitoring/storage
+    environment:
+      - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+      - CLTL_LOGGING_CONFIG=/cltl-monitoring/config/logging.config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    external: true

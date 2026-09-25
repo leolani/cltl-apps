@@ -7,11 +7,11 @@
 # override [cltl.backend] server_image_url/server_audio_url in
 # config/custom.config for a leoserv on a different host).
 #
-# Tenanted: run once per tenant, with a distinct CLTL_TENANT and host port:
+# Tenanted: run once per tenant, with a distinct CLTL_TENANT and host port —
+# see ../../config/clients.env, or its own copy for a second tenant:
 #
 #   ./run_host_server.sh &   # leoserv, on the host, once per physical client
-#   CLTL_TENANT=tenant-a CLTL_BACKEND_PORT=9001 \
-#       docker compose -f docker-compose.yml up -d --wait
+#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait
 #
 # Do NOT also list servers/broker/docker-compose.yml here once broker is
 # already running: this stack's project name differs from broker's, so
