@@ -40,12 +40,12 @@ before the "how".
 
 ```bash
 # 1. the shared platform half
-docker compose -f servers/broker/docker-compose.yml up -d --wait
+docker compose -f servers/broker/docker-compose.yml up -d --wait --pull always
 docker compose --env-file config/servers.env \
                 -f servers/broker/docker-compose.yml \
                 -f servers/eliza/docker-compose.yml \
                 -f servers/vad-asr/docker-compose.yml \
-                -f servers/emissor/docker-compose.yml up -d --wait
+                -f servers/emissor/docker-compose.yml up -d --wait --pull always
 
 # 2. host microphone server (outside Docker — a container has no microphone)
 cd clients/backend && ./run_host_server.sh &
@@ -59,8 +59,14 @@ docker compose --env-file config/clients.env \
     -f clients/backend/docker-compose.yml \
     -f clients/context/docker-compose.yml \
     -f clients/chat-ui/docker-compose.yml \
-    -f clients/monitoring/docker-compose.yml up -d --wait
+    -f clients/monitoring/docker-compose.yml up -d --wait --pull always
 ```
+
+`--pull always` matters here because `VERSION` is a moving, configurable tag
+(`:latest` by default): without it, Compose is content with whatever image is
+already cached locally, which silently stops tracking a tag someone keeps
+pushing to. It re-checks the registry on every `up`, which costs a few
+seconds even when nothing changed.
 
 Chat UI: <http://localhost:8003/chatui/static/chat.html> — answer the agent's
 opening consent question before anything else, or nothing responds.
@@ -75,7 +81,8 @@ opening consent question before anything else, or nothing responds.
 | 8005 | This tenant's monitoring view (`CLTL_MONITORING_PORT`) |
 | 8000 | Host microphone server (`leoserv`, on the host, not in Docker) |
 
-`VERSION=<tag> docker compose pull` pins images; default is `:latest`. A
+`VERSION=<tag>` before any command above pins every image to that tag instead
+of `:latest`. A
 second tenant runs the same step-3 command with a copy of `config/clients.env`
 holding different `CLTL_TENANT` and port values — see
 [`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for multi-tenant and partial-stack

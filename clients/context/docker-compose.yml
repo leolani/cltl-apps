@@ -10,7 +10,7 @@
 # service below depends_on rabbitmq directly, only on clients/backend.
 #
 #   docker compose --env-file ../../config/clients.env \
-#       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait
+#       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
 name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
 

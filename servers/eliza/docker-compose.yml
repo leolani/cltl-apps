@@ -4,7 +4,7 @@
 # service being healthy, which only resolves when broker's file is part of
 # the same invocation):
 #
-#   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait
+#   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
 name: cltl-platform
 

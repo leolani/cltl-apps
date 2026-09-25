@@ -11,7 +11,7 @@
 # see ../../config/clients.env, or its own copy for a second tenant:
 #
 #   ./run_host_server.sh &   # leoserv, on the host, once per physical client
-#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait
+#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait --pull always
 #
 # Do NOT also list servers/broker/docker-compose.yml here once broker is
 # already running: this stack's project name differs from broker's, so

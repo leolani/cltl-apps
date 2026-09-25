@@ -3,7 +3,7 @@
 # other stack under servers/ and clients/ declares `cltl-platform` as an
 # EXTERNAL network and refuses to start without it.
 #
-#   docker compose -f servers/broker/docker-compose.yml up -d --wait
+#   docker compose -f servers/broker/docker-compose.yml up -d --wait --pull always
 #
 # `name:` is shared verbatim across every servers/* compose file, so bringing
 # several of them up together in one `-f ... -f ...` invocation (see

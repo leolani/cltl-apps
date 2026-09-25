@@ -113,8 +113,12 @@ docker compose --env-file config/servers.env \
                 -f servers/broker/docker-compose.yml \
                 -f servers/eliza/docker-compose.yml \
                 -f servers/vad-asr/docker-compose.yml \
-                -f servers/emissor/docker-compose.yml up -d --wait
+                -f servers/emissor/docker-compose.yml up -d --wait --pull always
 ```
+
+`--pull always` matters because `VERSION` (in `config/servers.env`) is a
+configurable, moving tag — without it, Compose is happy with whatever image
+is already cached locally rather than re-checking the registry for that tag.
 
 Any subset of `servers/eliza`, `servers/vad-asr`, `servers/emissor` works,
 as long as `servers/broker` is included in the same invocation — the others
@@ -145,8 +149,12 @@ docker compose --env-file config/clients.env \
     -f clients/backend/docker-compose.yml \
     -f clients/context/docker-compose.yml \
     -f clients/chat-ui/docker-compose.yml \
-    -f clients/monitoring/docker-compose.yml up -d --wait
+    -f clients/monitoring/docker-compose.yml up -d --wait --pull always
 ```
+
+`--pull always` matters here for the same reason as the servers command
+above — `VERSION` is a configurable, moving tag, so every `up` should
+re-check the registry rather than trust whatever is cached locally.
 
 `clients/context` and `clients/chat-ui` still `depends_on: backend:
 condition: service_healthy` — that resolves because `clients/backend`'s
@@ -183,7 +191,7 @@ docker compose --env-file config/clients-tenant-b.env \
     -f clients/backend/docker-compose.yml \
     -f clients/context/docker-compose.yml \
     -f clients/chat-ui/docker-compose.yml \
-    -f clients/monitoring/docker-compose.yml up -d --wait
+    -f clients/monitoring/docker-compose.yml up -d --wait --pull always
 ```
 
 Distinct `CLTL_TENANT`, distinct host ports, same servers/ half. Each

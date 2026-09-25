@@ -5,7 +5,7 @@
 # servers/broker (external `cltl-platform` network) and servers/eliza's
 # storage being reachable, same as every other clients/* stack assumes.
 #
-#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait
+#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait --pull always
 #
 # Reads CLTL_TENANT and CLTL_MONITORING_PORT from ../../config/clients.env —
 # see that file, or make a copy for a second tenant.
