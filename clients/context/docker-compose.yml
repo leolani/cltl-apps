@@ -1,13 +1,8 @@
 # One tenant's scenario-creation service: opens/closes the conversation
 # scenario that makes clients/chat-ui willing to render and publish anything.
 #
-# Needs servers/broker running first, and clients/backend for the SAME
-# tenant up and healthy (see depends_on below — bring both files up in one
-# invocation, or already-running). Do NOT also list
-# servers/broker/docker-compose.yml here: this stack's project name differs
-# from broker's, so Compose would try to re-create the already-running
-# rabbitmq container and fail with a container-name conflict — and neither
-# service below depends_on rabbitmq directly, only on clients/backend.
+# Needs clients/backend for the SAME tenant up and healthy (see depends_on
+# below — bring both files up in one invocation, or already-running).
 #
 #   docker compose --env-file ../../config/clients.env \
 #       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
@@ -20,21 +15,15 @@ services:
     restart: "no"
     volumes:
       - ../../config/default.config:/cltl-context/config/default.config:ro
-      - ./config/custom.config:/cltl-context/config/custom.config:ro
+      - ../../config/custom.config:/cltl-context/config/custom.config:ro
       - ../../config/logging.config:/cltl-context/config/logging.config:ro
       - ../../storage:/cltl-context/storage
     environment:
       - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+      - CLTL_SERVER_HOST=${CLTL_SERVER_HOST:-host.docker.internal}
       - CLTL_LOGGING_CONFIG=/cltl-context/config/logging.config
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_healthy
-    networks:
-      - cltl-platform
-
-networks:
-  cltl-platform:
-    name: cltl-platform
-    external: true

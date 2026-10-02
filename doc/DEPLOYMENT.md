@@ -1,8 +1,20 @@
 # Deploying cltl-apps
 
-How to check this repository out, mount its configuration, and bring up
+How to check this repository out, configure it from a template, and bring up
 exactly the stacks you need — one tenant, several tenants, or just the
 servers.
+
+## One checkout per deployment
+
+A single `cltl-apps` checkout is dedicated to exactly **one** deployment: a
+server (the shared `servers/*` half), one tenant's client
+(`clients/*`), or a standalone attached module. There is no shared checkout
+that serves several roles at once — even two roles running on the same
+physical machine (a demo server + client, or a second tenant) are two
+separate `git clone`s, each configured from its own template. This is
+deliberate: it means a checkout's `config/` never has to represent more than
+one role, and "which deployment is this?" is never implicit in which compose
+command you happen to type.
 
 ## Checkout
 
@@ -16,6 +28,31 @@ its image from `ghcr.io/leolani`. Docker and Docker Compose v2 are the only
 prerequisites (Python 3.10 and PortAudio are needed only for
 `clients/backend/run_host_server.sh`, the host microphone server).
 
+## Configure from a template
+
+`config/` starts empty (see `config/README.md`) — populate it by copying the
+template matching this checkout's role:
+
+```bash
+cp templates/server/config/* config/    # this checkout is a server
+# or
+cp templates/client/config/* config/    # this checkout is one tenant's client
+```
+
+Then edit the copied files for this specific deployment:
+
+- **Server checkout**: usually nothing to edit — `config/custom.config` and
+  `config/servers.env` only carry optional, commented-out examples (a
+  platform-wide ASR model change, an image version pin).
+- **Client checkout**: edit `config/clients.env` — set `CLTL_TENANT` and this
+  tenant's ports, and `CLTL_SERVER_HOST` if the server isn't co-located (see
+  [A remote server](#a-remote-server)).
+
+`templates/module/` is not a config bundle — it points at
+[`custom-module/`](../custom-module/), which is fully self-contained (a third
+party clones it as its own separate repo) and carries its own
+`config/custom.config.example`.
+
 ## Directory model
 
 Every `docker-compose.yml` under `servers/` and `clients/` lives two levels
@@ -26,77 +63,68 @@ a stack's own directory — the relative paths resolve either way.
 
 ## Config layering
 
-Every stack mounts three files, not one directory — deliberately:
+Every stack in this checkout mounts the same three files from this
+checkout's own flat `config/`, not a per-stack copy:
 
 ```yaml
 volumes:
   - ../../config/default.config:/cltl-<name>/config/default.config:ro
-  - ./config/custom.config:/cltl-<name>/config/custom.config:ro       # stack-local
+  - ../../config/custom.config:/cltl-<name>/config/custom.config:ro
   - ../../config/logging.config:/cltl-<name>/config/logging.config:ro
 ```
 
-`config/default.config` (root) is the shared baseline — topic names, audio
-settings, everything that is the same for every container in the
-deployment. It is one file so a topic rename only happens once.
+`config/default.config` is this checkout's role-specific baseline — already
+correct for every stack this checkout runs, because a checkout only ever
+plays one role (server or client). It comes from a template
+(`templates/server/` or `templates/client/`), which is where a platform-wide
+change (a topic rename, say) should be made once and then re-copied — a
+deployment checkout's own `config/` is a filled-in copy, not a live link back
+to the template.
 
-`config/custom.config` is **stack-local** (`servers/eliza/config/custom.config`,
-`clients/chat-ui/config/custom.config`, …), for the handful of things that
-are *not* the same everywhere:
+`config/custom.config` is for the handful of values that differ for *this
+specific deployment* rather than for the role in general — a tenant id, a
+monitoring URL, a per-deployment ASR tweak. The default/custom split exists
+so those few edits are easy to find and diff against the template's stock
+version, without needing to hand-edit the (rarely-touched) baseline.
 
-- **Role**: `servers/eliza`'s `eliza-backend` runs `storage_main.py` and
-  needs `[cltl.backend]` configured as a store; `clients/backend` proxies the
-  host's microphone/camera server instead and needs the same section
-  configured completely differently. The root default carries the storage
-  role; `clients/backend/config/custom.config` overrides it.
-- **Tenant id**: every `clients/*` stack's `config/custom.config` sets
-  `[cltl.event.kombu] tenant: $CLTL_TENANT`. `servers/*` stacks carry no such
-  override — they stay untenanted, shared by every tenant. See
-  [Tenancy](#tenancy).
-
-If you need a setting to differ for one specific tenant rather than one
-role, add it to that tenant's own `clients/*/config/custom.config` invocation
-— or, since compose config paths are just files, point `CLTL_TENANT`'s stack
-at a copy of the directory with its own override. The common case (same
-config, different tenant id via environment) needs no copy at all — that is
-what `$CLTL_TENANT` interpolation is for.
-
-`config/custom.config` (root) is for changes that should apply to *every*
-stack — a platform-wide ASR model change, for example.
-
-Separately, `config/servers.env` and `config/clients.env` are **Docker
-Compose** variable files (`--env-file`), not app config — they supply the
-`CLTL_TENANT`/host-port values a compose command interpolates before a
-container ever starts, as opposed to `default.config`/`custom.config`, which
-are read by the running container itself. See
-[Bringing up stacks](#bringing-up-stacks).
+There is no more per-stack `custom.config` (e.g. a separate one for
+`clients/backend` vs. `clients/chat-ui`) — every stack in a client checkout
+shares the same one, the same way every stack in a server checkout always
+has. A section that's only relevant to one of the stacks (e.g. `[cltl.chat-ui]
+monitoring_url` only matters to `clients/chat-ui`) is simply a harmless no-op
+for the others, exactly like any other config key a given stack doesn't read.
 
 ## Tenancy
 
-The deployment is multi-tenant: one shared `servers/` half serves several
-isolated groups of users, and each `clients/` stack belongs to one of them.
+The deployment is multi-tenant: one shared server checkout serves several
+isolated tenants, each its own client checkout.
 
 ```
-   tenant-a                        shared servers/           tenant-b
+   tenant-a checkout               server checkout            tenant-b checkout
    ────────────────────            ─────────────────         ────────────────────
    clients/chat-ui    :8003 ─────► servers/broker (rabbitmq) ◄───── clients/chat-ui    :8004
-   clients/context                 servers/eliza                   clients/context
+   clients/context      │         servers/eliza                   clients/context
    clients/backend    :9001          (tenant: none)                clients/backend    :9002
-     tenant: tenant-a               servers/vad-asr                  tenant: tenant-b
-                                     servers/emissor
-                                       (tenant: none)
+     tenant: tenant-a     │        servers/vad-asr                   tenant: tenant-b
+                          └──────► servers/emissor ◄──────────────────┘
+                                     (tenant: none)
+     (CLTL_SERVER_HOST)                                        (CLTL_SERVER_HOST)
 ```
 
-One broker, one exchange, one Docker network (`cltl-platform`, created by
-`servers/broker`). The **only** thing keeping two tenants apart is the
+One broker, one exchange. The **only** thing keeping two tenants apart is the
 routing key each side binds: `cltl.topic.text_in.tenant-a` against
 `cltl.topic.text_in.tenant-b`, while the shared `servers/eliza` binds
-`cltl.topic.text_in.#` and hears both. Nothing here is separated by the
-network — separation is cooperative (a routing key), not enforced.
+`cltl.topic.text_in.#` and hears both. Separation is cooperative (a routing
+key), not enforced by network isolation.
 
 A tenant id is one lowercase routing-key word (`^[a-z0-9][a-z0-9_-]*$`) — set
-it via `CLTL_TENANT` in `config/clients.env` (or a per-tenant copy of it) for
-that tenant, and give each tenant its own `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT`/
-`CLTL_MONITORING_PORT` so their published host ports don't collide.
+it via `CLTL_TENANT` in that tenant's own checkout's `config/clients.env`.
+
+**A second tenant is a second checkout.** Clone `cltl-apps` again, copy
+`templates/client/config/*` into its `config/`, and give it its own
+`CLTL_TENANT` and `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT`/`CLTL_MONITORING_PORT`
+(and `CLTL_SERVER_HOST`, pointed at the same server checkout) so its published
+host ports don't collide with the first tenant's.
 
 `servers/*` stacks never set a tenant: they are the shared half, and setting
 one would scope, say, `servers/eliza`'s ELIZA to a single tenant's traffic
@@ -104,7 +132,8 @@ instead of everyone's.
 
 ## Bringing up stacks
 
-Every command below assumes the repository root as the working directory.
+Every command below assumes the repository root (of the relevant checkout)
+as the working directory.
 
 ### Just the servers (no client, e.g. for `custom-module` development)
 
@@ -130,16 +159,10 @@ env var on every command; `--env-file` works the same with nothing set.
 
 ### One tenant, full stack
 
-`servers/broker` must already be running (its network is `external: true` to
-every other stack). **Do not** also list `servers/broker/docker-compose.yml`
-in the command below: none of `clients/backend`, `clients/context`,
-`clients/chat-ui` or `clients/monitoring` `depends_on` the `rabbitmq` service
-directly (only `servers/eliza`, `servers/vad-asr` and `servers/emissor` do,
-which is why broker's file belongs in *that* command above), and a client
-stack's project name (`cltl-platform-client-<tenant>`) differs from broker's
-(`cltl-platform`) — Compose would try to re-create the already-running
-`rabbitmq` container under the client project and fail with a
-container-name conflict.
+Run this from a **client checkout** (`config/` populated from
+`templates/client/`), pointed at a server checkout via `CLTL_SERVER_HOST` —
+co-located (same machine, default `host.docker.internal`) or remote (see
+[A remote server](#a-remote-server)):
 
 ```bash
 cd clients/backend && ./run_host_server.sh &   # host mic server; skip for text-only
@@ -159,10 +182,11 @@ re-check the registry rather than trust whatever is cached locally.
 `clients/context` and `clients/chat-ui` still `depends_on: backend:
 condition: service_healthy` — that resolves because `clients/backend`'s
 service (named `backend`) is defined in this same invocation.
-`clients/monitoring` has no `depends_on` of its own; it only needs
-`servers/broker`/`servers/eliza` already running, same as the other three.
-`config/clients.env` carries `CLTL_TENANT` and every published port for this
-tenant — edit it (or use a copy, see below) rather than passing those inline.
+`clients/monitoring` has no `depends_on` of its own; it only needs the server
+checkout's `servers/broker`/`servers/eliza` already running and reachable via
+`CLTL_SERVER_HOST`, same as the other three. `config/clients.env` carries
+`CLTL_TENANT`, `CLTL_SERVER_HOST` and every published port for this tenant —
+edit it directly (this checkout only ever serves this one tenant).
 
 ### Monitoring
 
@@ -175,33 +199,39 @@ tab out, which is safer than one whose iframe can't load because
 `clients/monitoring` isn't actually running).
 
 `CLTL_MONITORING_URL` must be a bare origin (`http://localhost:<CLTL_MONITORING_PORT>`,
-no path) reachable from the browser, not the compose service name — the chat
-UI frontend appends the page path itself — and kept in sync with
-`CLTL_MONITORING_PORT` by hand, since Compose env files don't expand other
-variables within themselves.
+no path) reachable from the browser, not `CLTL_SERVER_HOST` or a compose
+service name — the chat UI frontend appends the page path itself — and kept
+in sync with `CLTL_MONITORING_PORT` by hand, since Compose env files don't
+expand other variables within themselves.
 
-### A second tenant, same host
+### A second tenant
 
-Copy `config/clients.env` (e.g. to `config/clients-tenant-b.env`) and edit
-`CLTL_TENANT`, `CLTL_BACKEND_PORT`, `CLTL_CHATUI_PORT`, `CLTL_MONITORING_PORT`
-and `CLTL_MONITORING_URL` to distinct values, then:
+A second tenant is a **second checkout** (see [Tenancy](#tenancy) above), not
+a copy of one file within the same checkout:
 
 ```bash
-docker compose --env-file config/clients-tenant-b.env \
+git clone https://github.com/leolani/cltl-apps.git cltl-client-tenant-b
+cd cltl-client-tenant-b
+cp templates/client/config/* config/
+# edit config/clients.env: distinct CLTL_TENANT, CLTL_BACKEND_PORT,
+# CLTL_CHATUI_PORT, CLTL_MONITORING_PORT, CLTL_MONITORING_URL — and the same
+# CLTL_SERVER_HOST as tenant-a's checkout, if pointed at the same server
+
+docker compose --env-file config/clients.env \
     -f clients/backend/docker-compose.yml \
     -f clients/context/docker-compose.yml \
     -f clients/chat-ui/docker-compose.yml \
     -f clients/monitoring/docker-compose.yml up -d --wait --pull always
 ```
 
-Distinct `CLTL_TENANT`, distinct host ports, same servers/ half. Each
-tenant's client stack is its own Compose project (`cltl-platform-client-<tenant>`),
-so `docker compose -p cltl-platform-client-tenant-a ... down` tears down one
-tenant without touching the other.
+Distinct `CLTL_TENANT`, distinct host ports, same server. Each tenant's
+client stack is its own Compose project (`cltl-platform-client-<tenant>`) in
+its own checkout, so tearing one down (`docker compose down` from that
+checkout) never touches the other.
 
 ### Text-only (no host microphone server)
 
-Set the mic topic empty in `clients/backend/config/custom.config`:
+Set the mic topic empty in `config/custom.config` (client checkout):
 
 ```ini
 [cltl.backend.mic]
@@ -213,35 +243,50 @@ input channel.
 
 ### A remote server
 
-If `servers/` runs on a different machine, point `config/default.config`'s
-`[cltl.event.kombu] server` and `[cltl.backend.remote_storage] storage_url`
-at that machine's address instead of the in-network `rabbitmq`/`eliza-backend`
-hostnames, and ensure ports 5672 and 8001 are reachable from the client
-machine.
+A client checkout reaches the server via **`CLTL_SERVER_HOST`**
+(`config/clients.env`) alone — nothing else. If the server checkout is on a
+different machine, set `CLTL_SERVER_HOST` to that machine's reachable
+hostname or IP, and ensure ports `5672` (AMQP) and `8001` (storage) are
+reachable from the client machine. `CLTL_SERVER_HOST` defaults to
+`host.docker.internal`, which is correct when the server checkout runs on
+this same machine (a separate checkout, per [above](#one-checkout-per-deployment)).
+
+Client stacks do not join any server-side Docker network — they never did
+need to for this to work, and not needing to is what makes a genuinely
+separate machine possible at all. (In earlier versions of this repository,
+`clients/*` declared an `external: true` network created only by
+`servers/broker` — which meant a client-only checkout with no local server
+failed to start at all, before ever reaching a config value: `network
+cltl-platform declared as external, but could not be found`. That
+requirement has been removed; upgrading from memory of the old behavior, you
+no longer need to work around it.)
 
 ## Troubleshooting
 
-**Chat UI shows no responses** — confirm `servers/*` is running and healthy
-(`docker compose -f servers/broker/docker-compose.yml ... ps`), and that this
-tenant's `CLTL_TENANT` (in `config/clients.env`) matches across
-`clients/backend`, `clients/context` and `clients/chat-ui` — a mismatch means
-a reply is published on a routing key nothing is listening on. Check
-RabbitMQ's management UI (<http://localhost:15672>, `eliza`/`eliza123`) for
+**Chat UI shows no responses** — confirm the server checkout's `servers/*` is
+running and healthy (`docker compose -f servers/broker/docker-compose.yml
+... ps`), that `CLTL_SERVER_HOST` in this client checkout's
+`config/clients.env` actually reaches it, and that this tenant's
+`CLTL_TENANT` matches across `clients/backend`, `clients/context` and
+`clients/chat-ui` (they share one `config/`, so this only breaks if you hand-
+edited one container's environment differently) — a mismatch means a reply
+is published on a routing key nothing is listening on. Check RabbitMQ's
+management UI (`http://<CLTL_SERVER_HOST>:15672`, `eliza`/`eliza123`) for
 traffic on the `cltl.combot` exchange.
 
 **No voice detection** — confirm `run_host_server.sh` (or `leoserv`) is
 running on the host and reachable at `http://localhost:8000/health`, and that
-`[cltl.backend.mic] topic` is set in `clients/backend/config/custom.config`.
+`[cltl.backend.mic] topic` is set in this checkout's `config/custom.config`.
 
-**Port already allocated** — another tenant, or a previous run, is using
-that `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT`/`CLTL_MONITORING_PORT` in
-`config/clients.env`. Give each tenant its own copy with a distinct set.
+**Port already allocated** — another tenant checkout, or a previous run, is
+using that `CLTL_BACKEND_PORT`/`CLTL_CHATUI_PORT`/`CLTL_MONITORING_PORT` on
+this machine. Give each tenant checkout's `config/clients.env` its own set.
 
 **"no such file" from `--env-file`** — you passed `--env-file
-config/clients.env` (or `config/servers.env`) from somewhere other than the
-repository root, or renamed/moved the file. Compose refuses to start rather
-than silently continuing with nothing set; re-run from the repository root or
-fix the path.
+config/clients.env` (or `config/servers.env`) from somewhere other than this
+checkout's repository root, or `config/` is still empty because you haven't
+copied a template into it yet (see [Configure from a
+template](#configure-from-a-template)).
 
 **Monitoring tab missing or blank** — confirm `clients/monitoring` was
 included in the `up` command and is healthy for this tenant, and that

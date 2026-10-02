@@ -48,11 +48,19 @@ All the architectures described below require that [Docker](https://docs.docker.
 | Docker Compose | 2.10            |       |
 ```
 
-Furthermore, clone the current repository somewhere on Disk:
+Furthermore, clone the current repository somewhere on disk:
 
 ```commandline
 git clone git@github.com:leolani/cltl-apps.git
 ```
+
+**One checkout plays one role.** Every walkthrough below needs this
+repository cloned *twice* — once configured as the server, once as a client
+— even when both run on the same machine; see
+[`doc/DEPLOYMENT.md`](DEPLOYMENT.md#one-checkout-per-deployment) for why.
+The clone command above is the same either way — which role a checkout plays
+comes from which `templates/` directory you copy into its `config/`, shown
+in the walkthroughs below.
 
 ## 2. Overall Leolani architecture
 
@@ -90,58 +98,62 @@ The ChatUI in the client program will listen to the ```event-bus``` for any ```T
 Figure 3 shows how the client and server applications are separated. They can run on the same machine or on different machines.
 If the server is installed on a remote machine the URL mappings from client to server need to be adapted to make a connection (see below).
 
-There are two chat-only server applications in this repository one that uses Eliza to respond and the other that uses an LLM:
+This repository's `servers/` directory holds the chat-only server stacks —
+`servers/eliza` uses Eliza to respond (an LLM-based equivalent is not part of
+this repository yet).
 
-- docker-eliza-server
-- docker-llm-server
-
-Both servers use the same chat-only client to get the user input and display the agent response:
-
-- docker-chat-client-app
+`clients/` holds the chat-only client stacks that get the user input and
+display the agent response.
 
 The client and the servers are available as Docker images:
 
 ### Docker images
 
-*User-interaction client*:
-- uai-client-backend (ghcr.io/leolani/cltl-backend): 
-- uai-client-context (ghcr.io/leolani/cltl-context): creates a new interaction scenario and stops it
-- uai-client-chatui (ghcr.io/leolani/cltl-chat-ui): browser chat interface to enter and display text messages
+*User-interaction client* (`clients/`):
+- backend (ghcr.io/leolani/cltl-backend): proxies the host's microphone/camera server
+- context (ghcr.io/leolani/cltl-context): creates a new interaction scenario and stops it
+- chat-ui (ghcr.io/leolani/cltl-chat-ui): browser chat interface to enter and display text messages
 
 *Event-bus-server*:
 - rabbitmq (rabbitmq:3.12-management): keeps track of incoming and outgoing messages
-- backend (ghcr.io/leolani/cltl-backend): event-bus module that captures the signals in a scenario
+- backend (ghcr.io/leolani/cltl-backend): the same image as the client's `backend` above, configured here (as `servers/eliza`'s `eliza-backend` service) as the storage/event-bus side instead of the microphone proxy
 - emissor (ghcr.io/leolani/cltl-emissor-data): saving the scenario and signal data to disk
 - communication module (one of the next two):
   - eliza (ghcr.io/leolani/cltl-eliza): uses keyword triggers and patterns to select a pre-stored response
-  - llm (ghcr.io/leolani/cltl-llm): uses a generative LLM to respond
+  - llm (ghcr.io/leolani/cltl-llm): uses a generative LLM to respond — not
+    shipped in this repository yet (see the note above)
 
 The client and server directories contain a ```docker-compose.yml``` file that defines the Docker images needed and any other settings.
 
 ### How to run ELIZA-chat from the command line:
 
-**i. Launch the server:**
+**i. Launch the server:** in a server checkout (`config/` populated from
+`templates/server/`):
 ```commandline
-cd docker-eliza-server
-docker compose up
+docker compose --env-file config/servers.env \
+                -f servers/broker/docker-compose.yml \
+                -f servers/eliza/docker-compose.yml up -d --wait --pull always
 ```
 
-The ```docker compose up``` command uses the docker-compose.yml file to load the images from DockerHub and set the configuration for the server.
-The first time you run it, the images need to be downloaded from the web and the application needs to be constructed on your server machine.
-The next time you run it, it checks if there are updates for the images. If so, the latest version is pulled from the web.
-Otherwise, the local installation is launched immediately. Pulling the images may take some time depending on the speed of the Internet connection.
+The `docker compose up` command uses the `docker-compose.yml` files to load
+the images from the registry and set the configuration for the server.
+The first time you run it, the images need to be downloaded from the web.
+The next time you run it, it checks if there are updates for the images. If
+so, the latest version is pulled from the web. `--pull always` makes it check
+every time, since `VERSION` is a moving tag.
 
-**ii. Launch the client:**
-
-The client is also a Docker image that is loaded and launched through the ```docker-compose.yml``` file in the client folder.
-When the server is running, you can fire up the client Docker image in another terminal:
+**ii. Launch the client:** in a *separate* checkout (`config/` populated from
+`templates/client/`) — see [`../doc/DEPLOYMENT.md`](DEPLOYMENT.md) for why
+client and server are always separate checkouts, even on the same machine:
 
 ```commandline
-cd docker-client
-docker compose up
+docker compose --env-file config/clients.env \
+    -f clients/backend/docker-compose.yml \
+    -f clients/context/docker-compose.yml \
+    -f clients/chat-ui/docker-compose.yml up -d --wait --pull always
 ```
 
-**iii. Open the chaUI:**
+**iii. Open the chatUI:**
 
 If both the server and client are stable, open a web browser with the following address:
 
@@ -149,10 +161,12 @@ If both the server and client are stable, open a web browser with the following 
 http://localhost:8003/chatui/static/chat.html
 ```
 
-You will see a chat interface in which the conversation is displayed. 
-See the [README](../docker-client/README.md)) of the ```docker client``` for further details.
+You will see a chat interface in which the conversation is displayed.
+See [`../doc/DEPLOYMENT.md`](DEPLOYMENT.md) for the full set of commands,
+including audio and multi-tenant setups.
 
-You stop the application using CTRL-C in the server and client terminal and by closing the web browser TAB.
+You stop the application with `docker compose down` in each checkout, and by
+closing the web browser tab.
 
 ## 4. Audio chat application
 
@@ -206,34 +220,41 @@ In addition to the Docker images, this application also needs the following to r
 
 ### How to run ELIZA-talk from the command line:
 
-**i. Launch the server:**
+**i. Launch the server:** in a server checkout, same as ELIZA-chat above,
+plus `servers/vad-asr`:
 ```commandline
-cd docker-eliza-server
-docker compose up
+docker compose --env-file config/servers.env \
+                -f servers/broker/docker-compose.yml \
+                -f servers/eliza/docker-compose.yml \
+                -f servers/vad-asr/docker-compose.yml up -d --wait --pull always
 ```
 
 **ii. Launch the client:**
 
-Before we launch the Docker image for the client, we now need to run a server on the local machine to capture the audio signals.
-The installation and launch of the server needs to be done in a separate terminal through the ```run_host_sever.sh``` script that
-can be found in the client folder:
+Before we launch the client's Docker images, we now need to run a server on
+the local machine to capture the audio signals — the
+```run_host_server.sh``` script found in a client checkout's
+`clients/backend/` directory:
 
 ```commandline
-cd docker-client
+cd clients/backend
 ./run_host_server.sh
 ```
 
-When the servers are running, you can fire up the client Docker image in another terminal:
+When that's running, bring up the client checkout's stacks in another
+terminal (from the checkout's repository root):
 
 ```commandline
-cd docker-client
-docker compose up
+docker compose --env-file config/clients.env \
+    -f clients/backend/docker-compose.yml \
+    -f clients/context/docker-compose.yml \
+    -f clients/chat-ui/docker-compose.yml up -d --wait --pull always
 ```
-**iii. Open the chaUI:**
+**iii. Open the chatUI:**
 ```url
 http://localhost:8003/chatui/static/chat.html
 ```
-See the [README](../docker-client/README.md)) of the ```docker client``` for further details.
+See [`../doc/DEPLOYMENT.md`](DEPLOYMENT.md) for further details.
 
 
 ## 5. Audio and image 

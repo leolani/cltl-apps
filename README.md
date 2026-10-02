@@ -4,57 +4,70 @@ Deployment stacks for the Leolani conversational-agent platform, assembled
 from published `ghcr.io/leolani/cltl-*` images — plus a template for
 attaching your own code to one.
 
+**One git checkout = one deployment.** Clone this repo once per node of your
+distributed application — once for the shared server, once per client/tenant
+— even if two of them end up running on the same machine. Each checkout gets
+its own `config/`, adapted to that one deployment via a template. See
+[`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for the full story.
+
 ## Layout
 
 ```
 cltl-apps/
-├── clients/          user-facing stacks — one set per tenant
-│   ├── backend/       proxies the host's microphone/camera server
-│   ├── context/       opens/closes a tenant's conversation scenario
-│   ├── chat-ui/       the web chat UI
-│   └── monitoring/    per-scenario view, shown as a chat-ui tab
-├── servers/          shared platform stacks — one instance for every tenant
-│   ├── broker/         RabbitMQ + the platform network
-│   ├── eliza/          storage API + the ELIZA dialogue engine
-│   ├── vad-asr/        voice activity detection + speech recognition
-│   └── emissor/        EMISSOR interaction-data capture + REST API
-├── custom-module/    template: attach your own code via the event bus
-├── config/            shared app config (mounted by every stack) plus
-│                        servers.env/clients.env, the docker compose --env-file
-│                        variables for the commands below
-├── storage/           shared persisted data, mounted by every stack above
+├── templates/        config templates to copy into a checkout's config/
+│   ├── server/         for servers/* — one instance, shared by every tenant
+│   ├── client/         for clients/* — one instance per tenant
+│   └── module/         pointer at custom-module/, see below
+├── clients/           user-facing stacks for THIS checkout's one tenant
+│   ├── backend/         proxies the host's microphone/camera server
+│   ├── context/         opens/closes this tenant's conversation scenario
+│   ├── chat-ui/         the web chat UI
+│   └── monitoring/      per-scenario view, shown as a chat-ui tab
+├── servers/           shared platform stacks for THIS checkout's server
+│   ├── broker/          RabbitMQ + this checkout's platform network
+│   ├── eliza/           storage API + the ELIZA dialogue engine
+│   ├── vad-asr/         voice activity detection + speech recognition
+│   └── emissor/         EMISSOR interaction-data capture + REST API
+├── custom-module/     template: attach your own code via the event bus
+├── config/            THIS checkout's own config — generated, not tracked;
+│                        populate it from templates/, see config/README.md
+├── storage/           THIS checkout's own persisted data
 └── doc/               architecture overview and the deployment guide
 ```
 
-Every stack under `servers/` and `clients/` is a separate Docker Compose
-file, invoked together with `-f`, sharing this repository's root `config/`
-and `storage/` directories. **Start here:**
-[`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) — checkout, configuration, and every
-stack-selection command, including running more than one tenant at once.
+A checkout only ever runs one role's worth of stacks — either `servers/*`
+(for a server node) or `clients/*` (for a client/tenant node) — though which
+of that role's compose files you combine with `-f` stays flexible (e.g. just
+`servers/vad-asr` on its own). **Start here:**
+[`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) — checkout, template, and every
+stack-selection command, including running more than one tenant.
 
 [`doc/LEOLANI.md`](doc/LEOLANI.md) is the narrative architecture overview of
 the platform and its agent variants — read that first if you want the "why"
 before the "how".
 
-## Quick start (one tenant, everything on one machine)
+## Quick start
+
+Bringing up a demo needs **two** checkouts — one configured as the server,
+one as the client — even on a single machine:
 
 ```bash
-# 1. the shared platform half
-docker compose -f servers/broker/docker-compose.yml up -d --wait --pull always
+git clone https://github.com/leolani/cltl-apps.git cltl-server && cd cltl-server
+cp templates/server/config/* config/
 docker compose --env-file config/servers.env \
                 -f servers/broker/docker-compose.yml \
                 -f servers/eliza/docker-compose.yml \
                 -f servers/vad-asr/docker-compose.yml \
                 -f servers/emissor/docker-compose.yml up -d --wait --pull always
+cd ..
 
-# 2. host microphone server (outside Docker — a container has no microphone)
-cd clients/backend && ./run_host_server.sh &
+git clone https://github.com/leolani/cltl-apps.git cltl-client && cd cltl-client
+cp templates/client/config/* config/
+# config/clients.env's CLTL_SERVER_HOST default (host.docker.internal)
+# already reaches cltl-server/ above on this same machine — no edit needed.
+
+cd clients/backend && ./run_host_server.sh &   # host mic server (needs Python 3.10 + PortAudio on this machine); skip for text-only
 cd ../..
-
-# 3. this tenant's client half (servers/broker must already be up — do not
-#    re-list it here: its project name differs from the client stacks', and
-#    Compose would try to re-create the already-running rabbitmq container).
-#    CLTL_TENANT and the published ports come from config/clients.env.
 docker compose --env-file config/clients.env \
     -f clients/backend/docker-compose.yml \
     -f clients/context/docker-compose.yml \
@@ -62,7 +75,7 @@ docker compose --env-file config/clients.env \
     -f clients/monitoring/docker-compose.yml up -d --wait --pull always
 ```
 
-`--pull always` matters here because `VERSION` is a moving, configurable tag
+`--pull always` matters because `VERSION` is a moving, configurable tag
 (`:latest` by default): without it, Compose is content with whatever image is
 already cached locally, which silently stops tracking a tag someone keeps
 pushing to. It re-checks the registry on every `up`, which costs a few
@@ -82,11 +95,10 @@ opening consent question before anything else, or nothing responds.
 | 8000 | Host microphone server (`leoserv`, on the host, not in Docker) |
 
 `VERSION=<tag>` before any command above pins every image to that tag instead
-of `:latest`. A
-second tenant runs the same step-3 command with a copy of `config/clients.env`
-holding different `CLTL_TENANT` and port values — see
+of `:latest`. A second tenant is a third checkout, configured from
+`templates/client/` again with its own `CLTL_TENANT` and port values — see
 [`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for multi-tenant and partial-stack
-(server-only, client-only) invocations, and its
+(server-only, client-only) invocations, a genuinely remote server, and its
 [monitoring section](doc/DEPLOYMENT.md#monitoring) for dropping
 `clients/monitoring` (the chat UI's Monitoring tab) if you don't want it.
 

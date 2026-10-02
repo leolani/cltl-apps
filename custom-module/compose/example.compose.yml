@@ -10,7 +10,7 @@
 #                   -f ../../servers/eliza/docker-compose.yml up -d --wait
 #   CLTL_TENANT=tenant-a docker compose -f ../../clients/context/docker-compose.yml up -d --wait
 #
-#   export CLTL_DEMO_CONFIG=$PWD/../../clients/context/config
+#   export CLTL_DEMO_CONFIG=$PWD/../../config
 #   CLTL_TENANT=tenant-a docker compose -f compose/example.compose.yml up
 #
 # Run it once per tenant — the project name interpolates CLTL_TENANT, so
@@ -60,10 +60,11 @@ services:
       # to come from outside, and it lands on custom.config because the loader
       # reads that as an overlay ON TOP of default.config.
       #
-      # Source is a clients/*/config directory: any of them carries the
-      # [cltl.event.kombu] tenant: $CLTL_TENANT line this module also needs —
-      # see clients/context/config/custom.config for the canonical one.
-      - ${CLTL_DEMO_CONFIG:?set to a running clients/* stack's config directory, e.g. ../../clients/chat-ui/config}/custom.config:/cltl-example/config/custom.config:ro
+      # Source is a client checkout's flat config/ directory, which carries
+      # the [cltl.event.kombu] tenant: $CLTL_TENANT line this module also
+      # needs — see templates/client/config/custom.config for the canonical
+      # one.
+      - ${CLTL_DEMO_CONFIG:?set to a running client checkout's config directory, e.g. ../../config}/custom.config:/cltl-example/config/custom.config:ro
     networks:
       - server
     restart: "no"
