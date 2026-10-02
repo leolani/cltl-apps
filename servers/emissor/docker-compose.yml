@@ -10,7 +10,11 @@ services:
     image: ghcr.io/leolani/cltl-emissor-data:${VERSION:-latest}
     container_name: eliza-emissor
     ports:
-      - "8002:8000"
+      # EMISSOR data API. Host bind address defaults to every interface, same
+      # as before; set CLTL_EMISSOR_BIND=127.0.0.1 in config/servers.env when
+      # servers/reverse-proxy fronts this checkout, so the raw port is no
+      # longer reachable from outside this host.
+      - "${CLTL_EMISSOR_BIND:-0.0.0.0}:8002:8000"
     volumes:
       - ../../config/default.config:/cltl-emissor-data/config/default.config:ro
       - ../../config/custom.config:/cltl-emissor-data/config/custom.config:ro
@@ -27,4 +31,4 @@ services:
 networks:
   cltl-platform:
     name: cltl-platform
-    external: true
+    driver: bridge

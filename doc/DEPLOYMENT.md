@@ -157,6 +157,58 @@ has nothing required in it — every `servers/*` image tag already defaults to
 `:latest` — it exists so pinning `VERSION` is one edit instead of an inline
 env var on every command; `--env-file` works the same with nothing set.
 
+### Fronting a public server with TLS and auth
+
+The command above is bare HTTP/AMQP with no authentication — correct for a
+server co-located with its clients, wrong once the host is reachable from the
+public internet. `servers/reverse-proxy` adds a 6th stack, `caddy`, that
+terminates TLS on `:443` and Basic-Auth-gates the storage API, the EMISSOR
+data API and RabbitMQ's management UI, dispatched by URL path
+(`/storage/*`, `/emissor/*`, `/rabbitmq/*` — see
+`servers/reverse-proxy/Caddyfile`). It is optional and additive: leave it out
+and this checkout behaves exactly as before.
+
+```bash
+docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<password>'
+echo '<user> <hash>' > config/basic-auth.auth   # one shared credential, every route
+
+# set CLTL_HOSTNAME and CLTL_ACME_EMAIL in config/servers.env first — caddy
+# refuses to start without them
+
+docker compose --env-file config/servers.env \
+                -f servers/broker/docker-compose.yml \
+                -f servers/eliza/docker-compose.yml \
+                -f servers/vad-asr/docker-compose.yml \
+                -f servers/emissor/docker-compose.yml \
+                -f servers/reverse-proxy/docker-compose.yml up -d --wait --pull always
+```
+
+`servers/reverse-proxy` must stay in the same invocation as the other four —
+same rule as above: its `depends_on: eliza-backend: condition:
+service_healthy` only resolves for a service defined in the same merged
+project. A DNS name for `CLTL_HOSTNAME` must already resolve to this host and
+port 80 reachable before the first `up`, for Caddy's ACME HTTP-01 challenge
+to succeed — watch `docker compose logs -f caddy` for it.
+
+The result: `https://<hostname>/storage/`, `https://<hostname>/emissor/` and
+`https://<hostname>/rabbitmq/` replace `http://<host>:8001/...`,
+`:8002/...` and `:15672` for anything reaching this checkout from outside.
+Once that's working, also uncomment `CLTL_STORAGE_BIND`,
+`CLTL_EMISSOR_BIND` and `CLTL_RABBITMQ_MGMT_BIND` in `config/servers.env`
+(set each to `127.0.0.1`) and re-run `up` — this stops the raw ports from
+being reachable from outside the host at all, leaving caddy as the only way
+in for those three. AMQP (`5672`) is untouched by any of this: no HTTP
+reverse proxy can add TLS or auth to it (its own auth is in-protocol SASL),
+so it keeps its existing plain binding regardless of whether
+`servers/reverse-proxy` is in use.
+
+A client checkout pointed at a proxied server needs its own `custom.config`
+edited to match — see [A remote server](#a-remote-server) below for exactly
+which keys. There is no equivalent client-side key for the EMISSOR data API:
+nothing in `templates/client/` consumes one, so `/emissor/*` behind the proxy
+is for direct/manual access only (a script, a notebook), not something a
+client stack's config needs to track.
+
 ### One tenant, full stack
 
 Run this from a **client checkout** (`config/` populated from
@@ -260,6 +312,29 @@ failed to start at all, before ever reaching a config value: `network
 cltl-platform declared as external, but could not be found`. That
 requirement has been removed; upgrading from memory of the old behavior, you
 no longer need to work around it.)
+
+**If the server checkout is fronted by `servers/reverse-proxy`** (see
+[Fronting a public server with TLS and auth](#fronting-a-public-server-with-tls-and-auth)),
+`CLTL_SERVER_HOST`/port alone can no longer express the endpoint — a
+path-prefixed HTTPS URL needs the client's own `config/custom.config` edited
+directly, overriding both storage keys from `templates/client/config/default.config`:
+
+```ini
+[cltl.backend]
+storage_url: https://<hostname>/storage/
+
+[cltl.backend.remote_storage]
+storage_url: https://<hostname>/storage
+```
+
+Embed the shared credential in the URL
+(`https://<user>:<password>@<hostname>/storage/`) if the client needs to
+authenticate automatically rather than being prompted. One caveat either way:
+`CltlAudioAdapter.send` (`cltl-backend/src/cltl/backend/source/client_source.py`)
+rewrites this URL before handing it to `requests` and drops any userinfo in
+the process, so a client that captures and uploads its own audio across the
+proxy will get a silent `401` rather than an authenticated request — a known
+upstream gap, not something this change fixes.
 
 ## Troubleshooting
 

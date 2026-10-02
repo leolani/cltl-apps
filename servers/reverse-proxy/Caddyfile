@@ -1,0 +1,66 @@
+# The public HTTP surface of a server checkout, routed by path to the three
+# HTTP services this platform exposes. AMQP is deliberately absent — see the
+# comment at the top of ./docker-compose.yml for why no reverse proxy can
+# help there.
+#
+# One shared Basic Auth credential guards every route (see
+# ./docker-compose.yml for how to generate it). This matches the platform's
+# existing tenancy model: separation between tenants is cooperative (a
+# routing key), not enforced — so one deployment-wide credential, kept off
+# the public internet otherwise, is proportionate. An operator who needs
+# per-user credentials can replace the single `import` below with one
+# `basic_auth` block per user.
+{
+	email {$CLTL_ACME_EMAIL}
+
+	# Port 80 stays open for the ACME HTTP-01 challenge alone. What it must
+	# NOT do is redirect to 443 — see ./docker-compose.yml.
+	auto_https disable_redirects
+}
+
+{$CLTL_HOSTNAME} {
+	# ---------------------------------------------------------------------
+	# The storage API (cltl-backend, servers/eliza).
+	#
+	# NOT stripped: the service is already mounted at /storage inside its
+	# own container (werkzeug DispatcherMiddleware), so
+	# `http://eliza-backend:8000/storage/image/x` is the real upstream path
+	# and this proxy must pass it through unchanged. `handle`, not
+	# `handle_path`, is what makes that so.
+	# ---------------------------------------------------------------------
+	handle /storage/* {
+		basic_auth {
+			import /etc/caddy/secrets/basic_auth.auth
+		}
+		reverse_proxy eliza-backend:8000
+	}
+
+	# ---------------------------------------------------------------------
+	# The EMISSOR data API (cltl-emissor-data, servers/emissor). Same
+	# already-mounted-at-/emissor shape as storage above.
+	# ---------------------------------------------------------------------
+	handle /emissor/* {
+		basic_auth {
+			import /etc/caddy/secrets/basic_auth.auth
+		}
+		reverse_proxy eliza-emissor:8000
+	}
+
+	# ---------------------------------------------------------------------
+	# The RabbitMQ management UI (servers/broker). `management.path_prefix`
+	# in config/rabbitmq-management.conf is what makes the UI itself work
+	# under a path rather than at a host root; without it the page loads and
+	# every asset 404s.
+	# ---------------------------------------------------------------------
+	handle /rabbitmq/* {
+		basic_auth {
+			import /etc/caddy/secrets/basic_auth.auth
+		}
+		reverse_proxy rabbitmq:15672
+	}
+
+	# Anything else, including the bare root, is not part of this deployment.
+	handle {
+		respond "cltl-apps: nothing is served here." 404
+	}
+}

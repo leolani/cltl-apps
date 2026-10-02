@@ -1,0 +1,84 @@
+# Optional TLS-termination and authentication for a server checkout reachable
+# from the public internet. Every other servers/* stack is bare HTTP/AMQP, no
+# auth — correct for a co-located demo, wrong for a host anyone outside this
+# machine can reach. Add this as a 5th -f file to that bring-up command (see
+# ../../doc/DEPLOYMENT.md) when, and only when, this checkout is public:
+#
+#   docker compose --env-file config/servers.env \
+#       -f servers/broker/docker-compose.yml \
+#       -f servers/eliza/docker-compose.yml \
+#       -f servers/vad-asr/docker-compose.yml \
+#       -f servers/emissor/docker-compose.yml \
+#       -f servers/reverse-proxy/docker-compose.yml up -d --wait --pull always
+#
+# Everything reachable from outside this host goes through caddy on 443,
+# dispatched by URL path to the service it fronts — see ./Caddyfile. AMQP
+# (5672) is NOT part of this: AMQP's auth is in-protocol SASL negotiated at
+# connect time, so no HTTP reverse proxy can add anything to it, and stock
+# caddy cannot proxy raw TCP at all. It keeps its existing plain binding;
+# TLS for the broker itself is a separate, bigger decision for later.
+#
+# One service here (`rabbitmq`) is not new — it is a partial override of the
+# same service servers/broker/docker-compose.yml already defines. Compose
+# concatenates list fields (like `volumes`) across merged -f files for a
+# service of the same name, so this file only ever adds the one extra mount
+# below; it changes nothing when this file is left out of the invocation.
+
+name: cltl-platform
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    depends_on:
+      eliza-backend:
+        condition: service_healthy
+    ports:
+      # 80 carries the ACME HTTP-01 challenge only. The redirect from 80 to
+      # 443 is switched off in ./Caddyfile: every request here can carry a
+      # Basic Auth credential, and an http:// URL mistyped by a client would
+      # otherwise be redirected to https:// with a 308 (which preserves the
+      # method and succeeds) — leaking that credential in clear text on the
+      # way. With the redirect off, the same mistake gets a plain 404.
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Not ./Caddyfile: Compose resolves every relative bind-mount path in a
+      # multi -f merge against the FIRST file's directory, not each file's
+      # own — a real gotcha the rest of servers/* never hits only because
+      # every servers/*/docker-compose.yml happens to sit at the same depth,
+      # so their "../../" always lands on the repo root regardless of -f
+      # order. This file's own content isn't at that depth from itself, so it
+      # needs the explicit repo-root-relative form too.
+      - ../../servers/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # One bcrypt line, `<user> <hash>`, shared by every handle block in the
+      # Caddyfile. Generate it once per deployment:
+      #   docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<password>'
+      #   echo '<user> <hash>' > config/basic-auth.auth
+      # A file, not inline in the Caddyfile: a bcrypt hash contains literal
+      # `$` characters that collide with the Caddyfile's own `{$VAR}`
+      # substitution syntax if written there directly.
+      - ../../config/basic-auth.auth:/etc/caddy/secrets/basic_auth.auth:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      CLTL_HOSTNAME: ${CLTL_HOSTNAME:?set CLTL_HOSTNAME in config/servers.env, e.g. combot.example.org}
+      CLTL_ACME_EMAIL: ${CLTL_ACME_EMAIL:?set CLTL_ACME_EMAIL in config/servers.env}
+    networks:
+      - cltl-platform
+
+  rabbitmq:
+    volumes:
+      # management.path_prefix = /rabbitmq — without it the management UI's
+      # own page loads under a proxied path but every asset it links resolves
+      # to the host root and 404s. servers/broker/docker-compose.yml mounts
+      # no rabbitmq.conf of its own, so this is the only one RabbitMQ reads.
+      - ../../servers/reverse-proxy/rabbitmq-management.conf:/etc/rabbitmq/rabbitmq.conf:ro
+
+volumes:
+  caddy-data:
+  caddy-config:
+
+networks:
+  cltl-platform:
+    name: cltl-platform
+    driver: bridge

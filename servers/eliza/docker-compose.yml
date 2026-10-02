@@ -1,8 +1,7 @@
 # The storage service and the ELIZA dialogue engine — untenanted, shared by
-# every tenant on the platform. Needs servers/broker running first (this file
-# joins `cltl-platform` as an external network and depends on the `rabbitmq`
-# service being healthy, which only resolves when broker's file is part of
-# the same invocation):
+# every tenant on the platform. Needs servers/broker in the same invocation
+# (this file depends on the `rabbitmq` service being healthy, which only
+# resolves when broker's file is merged into the same project):
 #
 #   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
@@ -14,7 +13,11 @@ services:
     command: ["python", "src/storage_main.py"]
     container_name: eliza-backend
     ports:
-      - "8001:8000"    # Storage API — exposed for remote clients
+      # Storage API. Host bind address defaults to every interface, same as
+      # before; set CLTL_STORAGE_BIND=127.0.0.1 in config/servers.env when
+      # servers/reverse-proxy fronts this checkout, so the raw port is no
+      # longer reachable from outside this host.
+      - "${CLTL_STORAGE_BIND:-0.0.0.0}:8001:8000"
     volumes:
       - ../../config/default.config:/cltl-backend/config/default.config:ro
       - ../../config/custom.config:/cltl-backend/config/custom.config:ro
@@ -53,4 +56,4 @@ services:
 networks:
   cltl-platform:
     name: cltl-platform
-    external: true
+    driver: bridge

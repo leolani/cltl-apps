@@ -18,8 +18,12 @@ services:
     container_name: rabbitmq
     hostname: rabbitmq
     ports:
-      - "5672:5672"    # AMQP — exposed for remote clients
-      - "15672:15672"  # Management UI
+      - "5672:5672"    # AMQP — exposed for remote clients, unaffected by servers/reverse-proxy
+      # Management UI. Host bind address defaults to every interface, same
+      # as before; set CLTL_RABBITMQ_MGMT_BIND=127.0.0.1 in config/servers.env
+      # when servers/reverse-proxy fronts this checkout, so the raw port is
+      # no longer reachable from outside this host.
+      - "${CLTL_RABBITMQ_MGMT_BIND:-0.0.0.0}:15672:15672"
     environment:
       - RABBITMQ_DEFAULT_USER=eliza
       - RABBITMQ_DEFAULT_PASS=eliza123
