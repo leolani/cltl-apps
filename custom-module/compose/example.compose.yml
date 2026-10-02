@@ -1,30 +1,30 @@
-# One service, joined to ONE TENANT of a Leolani deployment that is ALREADY
-# RUNNING.
+# One service, joined to a Leolani deployment that is ALREADY RUNNING.
 #
-# Written against a cltl-apps checkout: bring up the root servers/broker (and
-# whichever servers/* stacks the deployment needs) and one tenant's
-# clients/context first, then this container joins the SAME network as any
-# other tenant-scoped service:
+# Written against a cltl-apps checkout: bring up a deployment first — the
+# quickest being the standalone one, every module in one checkout — then this
+# container joins the SAME network:
 #
-#   docker compose -f ../../servers/broker/docker-compose.yml \
-#                   -f ../../servers/eliza/docker-compose.yml up -d --wait
-#   CLTL_TENANT=tenant-a docker compose -f ../../clients/context/docker-compose.yml up -d --wait
+#   docker compose --env-file ../../config/standalone.env \
+#                   -f ../../modules/broker/docker-compose.yml \
+#                   -f ../../modules/backend/docker-compose.yml \
+#                   -f ../../modules/eliza/docker-compose.yml \
+#                   -f ../../modules/context/docker-compose.yml up -d --wait
 #
 #   export CLTL_DEMO_CONFIG=$PWD/../../config
-#   CLTL_TENANT=tenant-a docker compose -f compose/example.compose.yml up
+#   docker compose -f compose/example.compose.yml up
 #
-# Run it once per tenant — the project name interpolates CLTL_TENANT, so
-# tenant-a's module and tenant-b's module coexist. The NETWORK you join
-# (`cltl-platform`, created by servers/broker) is the platform's and is the
-# same for every tenant; what makes this container tenant-a is CLTL_TENANT
-# and nothing else. The isolation is a routing key, not a network boundary —
-# see ../../doc/DEPLOYMENT.md#tenancy.
+# Against a multi-tenant deployment, set CLTL_TENANT to the tenant this
+# module serves: the project name interpolates it, so tenant-a's module and
+# tenant-b's module coexist. The NETWORK you join is the platform's and is
+# the same for every tenant — isolation is a routing key, not a network
+# boundary (see ../../doc/DEPLOYMENT.md#tenancy). Against a standalone
+# deployment, leave CLTL_TENANT unset.
 #
 # Against a different deployment entirely, point CLTL_SERVER_NETWORK,
 # CLTL_AMQP_URL and CLTL_STORAGE_URL at its own broker/network/storage
 # instead — nothing below is cltl-apps-specific except the defaults.
 
-name: cltl-example-module-${CLTL_TENANT:?set CLTL_TENANT to the tenant this module serves, e.g. tenant-a}
+name: cltl-example-module-${CLTL_TENANT:-untenanted}
 
 services:
   example:
@@ -37,19 +37,24 @@ services:
       # Where `cltl-storage:image/<id>` resolves. REAL, not a placeholder: this
       # module fetches the pixels of every image signal it sees, and
       # [myorg.example] image_storage_url refuses an empty or unexpanded value.
-      # Container-side view of servers/eliza's storage service, and the
+      # Container-side view of modules/backend's storage service, and the
       # trailing slash is load-bearing — the reference is resolved with
       # urljoin(), which drops the last path segment of a base without one.
-      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:-http://eliza-backend:8000/storage/}
+      CLTL_STORAGE_URL: ${CLTL_STORAGE_URL:-http://backend:8000/storage/}
       # $VAR interpolation happens at config READ time. Every variable the
       # mounted custom.config might interpolate has to be defined here, even
       # empty — an unset one is passed through as the literal string and only
       # warned about, never failed on.
       CLTL_AUDIO_URL: ""
       CLTL_TTS_URL: ""
-      # This is the whole demonstration: an empty value here makes the module
-      # answer every tenant; setting it scopes it to exactly one.
-      CLTL_TENANT: "${CLTL_TENANT:?set CLTL_TENANT to the tenant this module serves, e.g. tenant-a}"
+      # Note this does NOT decide the module's tenant on its own: the
+      # custom.config mounted below is the deployment's, and it carries a
+      # literal `[cltl.event.kombu] tenant` which wins over anything set
+      # here. Passing it keeps the variable defined (see the note above) and
+      # discriminates the project name. To run this module against a
+      # different tenant than the config it mounts, override that section in
+      # a config of your own instead.
+      CLTL_TENANT: "${CLTL_TENANT:-}"
     volumes:
       # One FILE, not the directory every platform module mounts over its own
       # config/. The deployment's config carries [cltl.event] implementation:
@@ -60,19 +65,21 @@ services:
       # to come from outside, and it lands on custom.config because the loader
       # reads that as an overlay ON TOP of default.config.
       #
-      # Source is a client checkout's flat config/ directory, which carries
-      # the [cltl.event.kombu] tenant: $CLTL_TENANT line this module also
-      # needs — see templates/client/config/custom.config for the canonical
-      # one.
-      - ${CLTL_DEMO_CONFIG:?set to a running client checkout's config directory, e.g. ../../config}/custom.config:/cltl-example/config/custom.config:ro
+      # Source is a running checkout's flat config/ directory, which carries
+      # the [cltl.event.kombu] section — broker address and tenant — that
+      # this module needs to join the same bus. See
+      # templates/client/config/custom.config (tenanted) or
+      # templates/standalone/config/custom.config (untenanted).
+      - ${CLTL_DEMO_CONFIG:?set to a running checkout's config directory, e.g. ../../config}/custom.config:/cltl-example/config/custom.config:ro
     networks:
       - server
     restart: "no"
 
 networks:
   server:
-    # The platform's network, created by servers/broker and shared by every
-    # tenant and every servers/* stack. Joining it is how this container
-    # reaches the broker; it is not what scopes it to a tenant.
+    # The platform's network, created by modules/broker and shared by every
+    # module in that deployment. Joining it is how this container reaches the
+    # broker; it is not what scopes it to a tenant. It is named after the
+    # deployment's CLTL_PROJECT, whose default is cltl-platform.
     name: ${CLTL_SERVER_NETWORK:-cltl-platform}
     external: true

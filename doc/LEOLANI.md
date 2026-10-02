@@ -98,41 +98,42 @@ The ChatUI in the client program will listen to the ```event-bus``` for any ```T
 Figure 3 shows how the client and server applications are separated. They can run on the same machine or on different machines.
 If the server is installed on a remote machine the URL mappings from client to server need to be adapted to make a connection (see below).
 
-This repository's `servers/` directory holds the chat-only server stacks —
-`servers/eliza` uses Eliza to respond (an LLM-based equivalent is not part of
-this repository yet).
+This repository's `modules/` directory holds all of these as one module per
+directory — `modules/eliza` uses Eliza to respond (an LLM-based equivalent is
+not part of this repository yet). Which of them run together, and whether the
+client and server halves are split across machines, is decided by a
+checkout's `config/` rather than by the modules themselves; see
+[`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-`clients/` holds the chat-only client stacks that get the user input and
-display the agent response.
-
-The client and the servers are available as Docker images:
+The modules are available as Docker images:
 
 ### Docker images
 
-*User-interaction client* (`clients/`):
+*User-interaction side* (`modules/backend`, `modules/context`, `modules/chat-ui`):
 - backend (ghcr.io/leolani/cltl-backend): proxies the host's microphone/camera server
 - context (ghcr.io/leolani/cltl-context): creates a new interaction scenario and stops it
 - chat-ui (ghcr.io/leolani/cltl-chat-ui): browser chat interface to enter and display text messages
 
-*Event-bus-server*:
+*Event-bus-server side* (`modules/broker`, `modules/backend`, `modules/emissor`, plus a communication module):
 - rabbitmq (rabbitmq:3.12-management): keeps track of incoming and outgoing messages
-- backend (ghcr.io/leolani/cltl-backend): the same image as the client's `backend` above, configured here (as `servers/eliza`'s `eliza-backend` service) as the storage/event-bus side instead of the microphone proxy
+- backend (ghcr.io/leolani/cltl-backend): the very same module as above — one container runs both the storage facet and the microphone-proxy facet, and configuration decides which are live. A split deployment therefore runs `modules/backend` on both sides, serving storage on the server and proxying audio on the client
 - emissor (ghcr.io/leolani/cltl-emissor-data): saving the scenario and signal data to disk
 - communication module (one of the next two):
   - eliza (ghcr.io/leolani/cltl-eliza): uses keyword triggers and patterns to select a pre-stored response
   - llm (ghcr.io/leolani/cltl-llm): uses a generative LLM to respond — not
     shipped in this repository yet (see the note above)
 
-The client and server directories contain a ```docker-compose.yml``` file that defines the Docker images needed and any other settings.
+Each directory under `modules/` contains a ```docker-compose.yml``` file that defines the Docker image it runs and any other settings.
 
 ### How to run ELIZA-chat from the command line:
 
 **i. Launch the server:** in a server checkout (`config/` populated from
-`templates/server/`):
+`templates/common/` plus `templates/server/`):
 ```commandline
-docker compose --env-file config/servers.env \
-                -f servers/broker/docker-compose.yml \
-                -f servers/eliza/docker-compose.yml up -d --wait --pull always
+docker compose --env-file config/server.env \
+                -f modules/broker/docker-compose.yml \
+                -f modules/backend/docker-compose.yml \
+                -f modules/eliza/docker-compose.yml up -d --wait --pull always
 ```
 
 The `docker compose up` command uses the `docker-compose.yml` files to load
@@ -143,14 +144,16 @@ so, the latest version is pulled from the web. `--pull always` makes it check
 every time, since `VERSION` is a moving tag.
 
 **ii. Launch the client:** in a *separate* checkout (`config/` populated from
-`templates/client/`) — see [`../doc/DEPLOYMENT.md`](DEPLOYMENT.md) for why
-client and server are always separate checkouts, even on the same machine:
+`templates/common/` plus `templates/client/`) — see
+[`DEPLOYMENT.md`](DEPLOYMENT.md) for why a split deployment needs two
+checkouts even on one machine, and for the standalone alternative that needs
+only one:
 
 ```commandline
-docker compose --env-file config/clients.env \
-    -f clients/backend/docker-compose.yml \
-    -f clients/context/docker-compose.yml \
-    -f clients/chat-ui/docker-compose.yml up -d --wait --pull always
+docker compose --env-file config/client.env \
+    -f modules/backend/docker-compose.yml \
+    -f modules/context/docker-compose.yml \
+    -f modules/chat-ui/docker-compose.yml up -d --wait --pull always
 ```
 
 **iii. Open the chatUI:**
@@ -221,34 +224,34 @@ In addition to the Docker images, this application also needs the following to r
 ### How to run ELIZA-talk from the command line:
 
 **i. Launch the server:** in a server checkout, same as ELIZA-chat above,
-plus `servers/vad-asr`:
+plus `modules/vad-asr`:
 ```commandline
-docker compose --env-file config/servers.env \
-                -f servers/broker/docker-compose.yml \
-                -f servers/eliza/docker-compose.yml \
-                -f servers/vad-asr/docker-compose.yml up -d --wait --pull always
+docker compose --env-file config/server.env \
+                -f modules/broker/docker-compose.yml \
+                -f modules/backend/docker-compose.yml \
+                -f modules/eliza/docker-compose.yml \
+                -f modules/vad-asr/docker-compose.yml up -d --wait --pull always
 ```
 
 **ii. Launch the client:**
 
 Before we launch the client's Docker images, we now need to run a server on
 the local machine to capture the audio signals — the
-```run_host_server.sh``` script found in a client checkout's
-`clients/backend/` directory:
+```run_host_server.sh``` script found in `modules/backend/`:
 
 ```commandline
-cd clients/backend
+cd modules/backend
 ./run_host_server.sh
 ```
 
-When that's running, bring up the client checkout's stacks in another
+When that's running, bring up the client checkout's modules in another
 terminal (from the checkout's repository root):
 
 ```commandline
-docker compose --env-file config/clients.env \
-    -f clients/backend/docker-compose.yml \
-    -f clients/context/docker-compose.yml \
-    -f clients/chat-ui/docker-compose.yml up -d --wait --pull always
+docker compose --env-file config/client.env \
+    -f modules/backend/docker-compose.yml \
+    -f modules/context/docker-compose.yml \
+    -f modules/chat-ui/docker-compose.yml up -d --wait --pull always
 ```
 **iii. Open the chatUI:**
 ```url

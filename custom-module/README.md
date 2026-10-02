@@ -36,9 +36,11 @@ each other. They all talk to a **message bus**, publishing events on named
 ```
 
 A deployment built to run this module (see the repository root's
-[`servers/` and `clients/`](../doc/DEPLOYMENT.md)) is **multi-tenant**: one
-shared platform serves several isolated groups of users, and your module
-belongs to one of them. The **only** thing keeping tenants apart is the
+[`modules/`](../doc/DEPLOYMENT.md)) may be **multi-tenant**: one shared
+platform serving several isolated groups of users, with your module belonging
+to one of them. It may equally be a standalone deployment with no tenant at
+all, in which case leave `CLTL_TENANT` empty and everything below still
+applies — bar the routing-key suffix. The **only** thing keeping tenants apart is the
 routing key each side binds — `cltl.topic.text_in.tenant-a` against
 `cltl.topic.text_in.tenant-b`, while the shared `cltl-eliza` binds
 `cltl.topic.text_in.#` and hears both. See
@@ -80,8 +82,8 @@ correctly:
   silently reaches nobody.
 
 Opening the conversation's scenario is **not** this module's job — that is
-the platform's own `cltl-context`, one instance per tenant (see
-[`../clients/context`](../clients/context)). A standalone copy of this
+the platform's own `cltl-context` (see
+[`../modules/context`](../modules/context)). A standalone copy of this
 template used to carry a throwaway scenario-opener for deployments that had
 none of their own; against this platform there always is one, so
 `src/main.py` composes nothing beyond the one container below.
@@ -92,7 +94,7 @@ none of their own; against this platform there always is one, so
 |---|---|---|---|
 | **Notebook** | `custom-module.ipynb` | An interactive, cell-by-cell look at subscribing and publishing on the bus | a Python 3.10 venv, `pip install -r requirements.notebook.txt jupyterlab`, and a full tenant already running (see below) |
 | **Component** | `src/main.py` | A packaged, tested, installable module, run standalone against a real deployment's broker | a Python 3.10 venv, `pip install -r requirements.txt` |
-| **Container** | `compose/example.compose.yml` | Runs inside the deployment like any platform module | `../servers/broker` (+ whichever `servers/*` the deployment needs) and one tenant's `../clients/context` already running |
+| **Container** | `compose/example.compose.yml` | Runs inside the deployment like any platform module | `../modules/broker` (+ whichever other modules the deployment needs) and `../modules/context` already running |
 
 All three attach to an **already-running** deployment — this repository
 builds no deployment of its own. See
@@ -100,12 +102,11 @@ builds no deployment of its own. See
 
 ### Notebook
 
-The notebook attaches to a tenant's **already-open** conversation — it does
-not open or close a scenario itself, since that is `../clients/context`'s
-job (see "What this template is" above). Bring up a full tenant first —
-`../servers/broker` (+ whichever `../servers/*` the deployment needs) and
-one tenant's `../clients/backend` + `../clients/context` + `../clients/chat-ui`
-— then:
+The notebook attaches to an **already-open** conversation — it does not open
+or close a scenario itself, since that is `../modules/context`'s job (see
+"What this template is" above). Bring up a deployment first — the quickest
+being the standalone one in [`../doc/DEPLOYMENT.md`](../doc/DEPLOYMENT.md),
+which is every module in one checkout — then:
 
 ```bash
 python3.10 -m venv .venv && source .venv/bin/activate

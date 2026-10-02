@@ -1,12 +1,13 @@
 # Copy this to config/custom.config (gitignored — never commit it) to point
 # the standalone `python src/main.py` at a real deployment's broker instead of
-# the in-process default, as one tenant of it. Written against a cltl-apps
-# checkout's root servers/+clients/ stacks (see ../../doc/DEPLOYMENT.md); the
-# ports below are servers/eliza's (storage on 8001) and clients/chat-ui's
-# tenant port, reached from OUTSIDE the `cltl-platform` Docker network.
+# the in-process default. Written against a cltl-apps checkout's modules/ (see
+# ../../doc/DEPLOYMENT.md); the ports below are modules/backend's storage API
+# (8001) and modules/chat-ui's, reached from OUTSIDE the deployment's Docker
+# network.
 #
-#   docker compose -f ../../servers/broker/docker-compose.yml \
-#                   -f ../../servers/eliza/docker-compose.yml up -d --wait
+#   docker compose -f ../../modules/broker/docker-compose.yml \
+#                   -f ../../modules/backend/docker-compose.yml \
+#                   -f ../../modules/eliza/docker-compose.yml up -d --wait
 #   cp config/custom.config.example config/custom.config
 #   CLTL_AMQP_URL=amqp://eliza:eliza123@127.0.0.1:5672/ CLTL_TENANT=tenant-a \
 #       CLTL_STORAGE_URL=http://127.0.0.1:8001/storage/ \
@@ -22,7 +23,7 @@
 # empty, this module binds `<topic>.#` and answers every tenant on the
 # exchange — correct only for a single-tenant deployment. Scenario creation is
 # NOT this module's job against this platform: a real `cltl-context` (e.g.
-# clients/context, one per tenant) opens it.
+# modules/context) opens it.
 #
 # $VAR interpolation happens at READ time (EnvInterpolation, in
 # cltl.combot.infra.config.local), not when this file is parsed. An *unset*
