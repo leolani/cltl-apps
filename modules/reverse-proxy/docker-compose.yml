@@ -1,15 +1,16 @@
-# Optional TLS-termination and authentication for a server checkout reachable
-# from the public internet. Every other servers/* stack is bare HTTP/AMQP, no
-# auth — correct for a co-located demo, wrong for a host anyone outside this
-# machine can reach. Add this as a 5th -f file to that bring-up command (see
-# ../../doc/DEPLOYMENT.md) when, and only when, this checkout is public:
+# Optional TLS-termination and authentication for a deployment reachable from
+# the public internet. Every other module is bare HTTP/AMQP with no auth —
+# correct for a co-located demo, wrong for a host anyone outside this machine
+# can reach. Add it to the bring-up command (see ../../doc/DEPLOYMENT.md)
+# when, and only when, this deployment is public:
 #
-#   docker compose --env-file config/servers.env \
-#       -f servers/broker/docker-compose.yml \
-#       -f servers/eliza/docker-compose.yml \
-#       -f servers/vad-asr/docker-compose.yml \
-#       -f servers/emissor/docker-compose.yml \
-#       -f servers/reverse-proxy/docker-compose.yml up -d --wait --pull always
+#   docker compose --env-file config/server.env \
+#       -f modules/broker/docker-compose.yml \
+#       -f modules/backend/docker-compose.yml \
+#       -f modules/eliza/docker-compose.yml \
+#       -f modules/vad-asr/docker-compose.yml \
+#       -f modules/emissor/docker-compose.yml \
+#       -f modules/reverse-proxy/docker-compose.yml up -d --wait --pull always
 #
 # Everything reachable from outside this host goes through caddy on 443,
 # dispatched by URL path to the service it fronts — see ./Caddyfile. AMQP
@@ -19,18 +20,18 @@
 # TLS for the broker itself is a separate, bigger decision for later.
 #
 # One service here (`rabbitmq`) is not new — it is a partial override of the
-# same service servers/broker/docker-compose.yml already defines. Compose
+# same service modules/broker/docker-compose.yml already defines. Compose
 # concatenates list fields (like `volumes`) across merged -f files for a
 # service of the same name, so this file only ever adds the one extra mount
 # below; it changes nothing when this file is left out of the invocation.
 
-name: cltl-platform
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   caddy:
     image: caddy:2.8-alpine
     depends_on:
-      eliza-backend:
+      backend:
         condition: service_healthy
     ports:
       # 80 carries the ACME HTTP-01 challenge only. The redirect from 80 to
@@ -44,12 +45,12 @@ services:
     volumes:
       # Not ./Caddyfile: Compose resolves every relative bind-mount path in a
       # multi -f merge against the FIRST file's directory, not each file's
-      # own — a real gotcha the rest of servers/* never hits only because
-      # every servers/*/docker-compose.yml happens to sit at the same depth,
-      # so their "../../" always lands on the repo root regardless of -f
-      # order. This file's own content isn't at that depth from itself, so it
-      # needs the explicit repo-root-relative form too.
-      - ../../servers/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # own — a real gotcha the other modules never hit only because every
+      # modules/*/docker-compose.yml happens to sit at the same depth, so
+      # their "../../" always lands on the repo root regardless of -f order.
+      # This file's own content isn't at that depth from itself, so it needs
+      # the explicit repo-root-relative form too.
+      - ../../modules/reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
       # One bcrypt line, `<user> <hash>`, shared by every handle block in the
       # Caddyfile. Generate it once per deployment:
       #   docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<password>'
@@ -61,8 +62,8 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     environment:
-      CLTL_HOSTNAME: ${CLTL_HOSTNAME:?set CLTL_HOSTNAME in config/servers.env, e.g. combot.example.org}
-      CLTL_ACME_EMAIL: ${CLTL_ACME_EMAIL:?set CLTL_ACME_EMAIL in config/servers.env}
+      CLTL_HOSTNAME: ${CLTL_HOSTNAME:?set CLTL_HOSTNAME in this checkout's env file, e.g. combot.example.org}
+      CLTL_ACME_EMAIL: ${CLTL_ACME_EMAIL:?set CLTL_ACME_EMAIL in this checkout's env file}
     networks:
       - cltl-platform
 
@@ -70,9 +71,9 @@ services:
     volumes:
       # management.path_prefix = /rabbitmq — without it the management UI's
       # own page loads under a proxied path but every asset it links resolves
-      # to the host root and 404s. servers/broker/docker-compose.yml mounts
+      # to the host root and 404s. modules/broker/docker-compose.yml mounts
       # no rabbitmq.conf of its own, so this is the only one RabbitMQ reads.
-      - ../../servers/reverse-proxy/rabbitmq-management.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ../../modules/reverse-proxy/rabbitmq-management.conf:/etc/rabbitmq/rabbitmq.conf:ro
 
 volumes:
   caddy-data:
@@ -80,5 +81,5 @@ volumes:
 
 networks:
   cltl-platform:
-    name: cltl-platform
+    name: ${CLTL_PROJECT:-cltl-platform}
     driver: bridge

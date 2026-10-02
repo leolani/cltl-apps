@@ -1,33 +1,39 @@
-# One tenant's web chat UI.
+# The web chat UI: the browser-facing text input and output channel, and the
+# sole input channel in a text-only deployment.
 #
-# Needs clients/backend for the SAME tenant up and healthy (see depends_on
-# below — bring both files up in one invocation, or already-running).
+# Its Monitoring tab is an iframe onto modules/monitoring, shown only when
+# [cltl.chat-ui] monitoring_url is set in config/custom.config.
 #
-#   docker compose --env-file ../../config/clients.env \
+# Needs modules/backend up and healthy (see depends_on below — bring both up
+# in one invocation, or have backend already running):
+#
+#   docker compose --env-file ../../config/<role>.env \
 #       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
-name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   chatui:
     image: ghcr.io/leolani/cltl-chat-ui:${VERSION:-latest}
     restart: "no"
     ports:
-      - "${CLTL_CHATUI_PORT:?set a distinct host port per tenant, e.g. 8003 for tenant-a and 8004 for tenant-b}:8000"
+      - "${CLTL_CHATUI_PORT:-8003}:8000"
     volumes:
       - ../../config/default.config:/cltl-chatui/config/default.config:ro
       - ../../config/custom.config:/cltl-chatui/config/custom.config:ro
       - ../../config/logging.config:/cltl-chatui/config/logging.config:ro
       - ../../storage:/cltl-chatui/storage
     environment:
-      - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
-      - CLTL_SERVER_HOST=${CLTL_SERVER_HOST:-host.docker.internal}
       - CLTL_LOGGING_CONFIG=/cltl-chatui/config/logging.config
-      # Set via CLTL_MONITORING_URL in ../../config/clients.env (commented
-      # out there by default, which leaves this tab out).
-      - CLTL_MONITORING_URL=${CLTL_MONITORING_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: ${CLTL_PROJECT:-cltl-platform}
+    driver: bridge

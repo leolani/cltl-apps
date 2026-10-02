@@ -1,13 +1,19 @@
-# One tenant's scenario-creation service: opens/closes the conversation
-# scenario that makes clients/chat-ui willing to render and publish anything.
+# The scenario-creation service: opens and closes the conversation scenario
+# that makes modules/chat-ui willing to render and publish anything. Also
+# carries the BDI model and the init intention.
 #
-# Needs clients/backend for the SAME tenant up and healthy (see depends_on
-# below — bring both files up in one invocation, or already-running).
+# Tenant-aware: it logs a warning per event when no tenant is configured, but
+# runs regardless — a standalone deployment leaves the tenant empty and all
+# modules then publish and bind untenanted. In a multi-tenant deployment,
+# run one per tenant with that tenant's [cltl.event.kombu] tenant set.
 #
-#   docker compose --env-file ../../config/clients.env \
+# Needs modules/backend up and healthy (see depends_on below — bring both up
+# in one invocation, or have backend already running):
+#
+#   docker compose --env-file ../../config/<role>.env \
 #       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
-name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   context:
@@ -19,11 +25,16 @@ services:
       - ../../config/logging.config:/cltl-context/config/logging.config:ro
       - ../../storage:/cltl-context/storage
     environment:
-      - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
-      - CLTL_SERVER_HOST=${CLTL_SERVER_HOST:-host.docker.internal}
       - CLTL_LOGGING_CONFIG=/cltl-context/config/logging.config
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: ${CLTL_PROJECT:-cltl-platform}
+    driver: bridge

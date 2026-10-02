@@ -1,37 +1,50 @@
-# One tenant's backend: proxies the host machine's microphone/camera server
-# (leoserv — see run_host_server.sh, which cannot run in Docker: a container
-# has no microphone) into the platform's storage and event bus.
+# The platform's backend. One cltl-backend image running two facets in one
+# container (BackendContainer extends StorageContainer):
 #
-# Reaches the Leolani server via CLTL_SERVER_HOST (config/clients.env) — no
-# shared Docker network required, co-located or remote. A leoserv instance
-# must be reachable at host.docker.internal:8000 (or override [cltl.backend]
-# server_image_url/server_audio_url in config/custom.config for a leoserv on
-# a different host — a separate concern from CLTL_SERVER_HOST, see
-# doc/DEPLOYMENT.md).
+#   - storage — the /storage HTTP API, always mounted. With [cltl.backend]
+#     audio_storage/image_storage = local it holds the store itself; with
+#     `remote` it forwards to another backend's storage_url.
+#   - hardware I/O — microphone, camera and text-to-speech, proxied from the
+#     host's microphone/camera server (leoserv; see run_host_server.sh, which
+#     cannot run in Docker because a container has no microphone). Each is
+#     switched off by leaving its topic empty in config.
 #
-# Tenanted: run once per tenant, with a distinct CLTL_TENANT and host port —
-# see config/clients.env, or a second checkout of this repo for a second
-# tenant:
+# Which facets are live is purely configuration, which is why there is one
+# backend module and not a separate one per deployment role:
 #
-#   ./run_host_server.sh &   # leoserv, on the host, once per physical client
-#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait --pull always
+#   standalone   both — holds the store AND proxies this machine's leoserv
+#   server       storage only — mic/image/tts topics left empty
+#   client       hardware I/O, forwarding storage to the server's backend
+#
+# See ../../templates/ for those three configurations, and
+# ../../doc/DEPLOYMENT.md for which modules each deployment runs.
+#
+# Deliberately declares no `depends_on: rabbitmq`: a client deployment runs
+# this module with no local broker, and a depends_on naming a service absent
+# from the invocation makes Compose refuse to start at all.
+#
+#   ./run_host_server.sh &   # leoserv, on the host — skip for text-only
+#   docker compose --env-file ../../config/<role>.env -f docker-compose.yml up -d --wait --pull always
 
-name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   backend:
     image: ghcr.io/leolani/cltl-backend:${VERSION:-latest}
     restart: "no"
     ports:
-      - "${CLTL_BACKEND_PORT:?set a distinct host port per tenant, e.g. 9001 for tenant-a and 9002 for tenant-b}:8000"
+      # The /storage API (plus /host, when [cltl.backend] run_server is set).
+      # Host bind address defaults to every interface; set
+      # CLTL_STORAGE_BIND=127.0.0.1 in this checkout's env file when
+      # modules/reverse-proxy fronts it, so the raw port is no longer
+      # reachable from outside this host.
+      - "${CLTL_STORAGE_BIND:-0.0.0.0}:${CLTL_BACKEND_PORT:-8001}:8000"
     volumes:
       - ../../config/default.config:/cltl-backend/config/default.config:ro
       - ../../config/custom.config:/cltl-backend/config/custom.config:ro
       - ../../config/logging.config:/cltl-backend/config/logging.config:ro
       - ../../storage:/cltl-backend/storage
     environment:
-      - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
-      - CLTL_SERVER_HOST=${CLTL_SERVER_HOST:-host.docker.internal}
       - CLTL_LOGGING_CONFIG=/cltl-backend/config/logging.config
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -41,3 +54,10 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: ${CLTL_PROJECT:-cltl-platform}
+    driver: bridge

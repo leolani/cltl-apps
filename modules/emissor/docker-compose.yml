@@ -1,19 +1,24 @@
-# EMISSOR interaction-data capture + REST API — untenanted, shared by every
-# tenant. Needs servers/broker running first, same rule as servers/eliza:
+# EMISSOR interaction-data capture + its REST API: records the topics listed
+# under [cltl.emissor-data.event] into storage/emissor.
+#
+# Untenanted — with no tenant configured it binds `<topic>.#` and so captures
+# every tenant's interaction data into one store.
+#
+# Needs modules/broker in the same invocation (the depends_on below only
+# resolves for a service defined in the same merged project):
 #
 #   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
-name: cltl-platform
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   eliza-emissor:
     image: ghcr.io/leolani/cltl-emissor-data:${VERSION:-latest}
-    container_name: eliza-emissor
     ports:
-      # EMISSOR data API. Host bind address defaults to every interface, same
-      # as before; set CLTL_EMISSOR_BIND=127.0.0.1 in config/servers.env when
-      # servers/reverse-proxy fronts this checkout, so the raw port is no
-      # longer reachable from outside this host.
+      # EMISSOR data API. Host bind address defaults to every interface; set
+      # CLTL_EMISSOR_BIND=127.0.0.1 in this checkout's env file when
+      # modules/reverse-proxy fronts it, so the raw port is no longer
+      # reachable from outside this host.
       - "${CLTL_EMISSOR_BIND:-0.0.0.0}:8002:8000"
     volumes:
       - ../../config/default.config:/cltl-emissor-data/config/default.config:ro
@@ -25,10 +30,12 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cltl-platform
 
 networks:
   cltl-platform:
-    name: cltl-platform
+    name: ${CLTL_PROJECT:-cltl-platform}
     driver: bridge

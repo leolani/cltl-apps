@@ -1,14 +1,20 @@
-# Voice activity detection + speech recognition — untenanted, shared by every
-# tenant. Needs servers/broker running first, same rule as servers/eliza:
+# Voice activity detection + speech recognition. One module rather than two:
+# VAD publishes to vad_topic and ASR is its only consumer, so there is no
+# deployment that wants one without the other.
+#
+# Untenanted — with no tenant configured both bind `<topic>.#` and so serve
+# every tenant on the platform.
+#
+# Needs modules/broker in the same invocation (the depends_on below only
+# resolves for a service defined in the same merged project):
 #
 #   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
-name: cltl-platform
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   eliza-vad:
     image: ghcr.io/leolani/cltl-vad:${VERSION:-latest}
-    container_name: eliza-vad
     volumes:
       - ../../config/default.config:/cltl-vad/config/default.config:ro
       - ../../config/custom.config:/cltl-vad/config/custom.config:ro
@@ -19,12 +25,13 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cltl-platform
 
   eliza-asr:
     image: ghcr.io/leolani/cltl-asr:${VERSION:-latest}
-    container_name: eliza-asr
     volumes:
       - ../../config/default.config:/cltl-asr/config/default.config:ro
       - ../../config/custom.config:/cltl-asr/config/custom.config:ro
@@ -35,10 +42,12 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cltl-platform
 
 networks:
   cltl-platform:
-    name: cltl-platform
+    name: ${CLTL_PROJECT:-cltl-platform}
     driver: bridge

@@ -1,28 +1,38 @@
-# The shared, untenanted half of the platform: the broker every servers/* and
-# clients/* stack talks through, on one network. Start this FIRST — every
-# other stack under servers/ and clients/ declares `cltl-platform` as an
-# EXTERNAL network and refuses to start without it.
+# The platform's message broker: RabbitMQ, plus the Docker network that every
+# module in THIS deployment shares. Start it first — modules/eliza,
+# modules/vad-asr, modules/emissor and modules/reverse-proxy each declare
+# `depends_on: rabbitmq: condition: service_healthy`, which Compose can only
+# resolve for a service defined in the same merged project:
 #
-#   docker compose -f servers/broker/docker-compose.yml up -d --wait --pull always
+#   docker compose -f modules/broker/docker-compose.yml up -d --wait --pull always
 #
-# `name:` is shared verbatim across every servers/* compose file, so bringing
-# several of them up together in one `-f ... -f ...` invocation (see
-# ../../doc/DEPLOYMENT.md) merges them into a single compose project and lets
-# `depends_on: condition: service_healthy` resolve across files.
+# A client deployment does NOT run this module: it reaches the server's
+# broker over AMQP, set as [cltl.event.kombu] server in config/custom.config.
+# A server or standalone deployment runs exactly one of it.
+#
+# `name:` interpolates identically in every modules/* compose file, so
+# bringing several up in one `-f ... -f ...` invocation merges them into a
+# single Compose project — which is what lets `depends_on` resolve across
+# files. See ../../doc/DEPLOYMENT.md.
 
-name: cltl-platform
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   rabbitmq:
     image: "rabbitmq:3.12-management"
-    container_name: rabbitmq
+    # Load-bearing: RabbitMQ derives its node name and mnesia directory
+    # (storage/rabbitmq/mnesia/rabbit@rabbitmq) from this. Changing it
+    # orphans an existing broker's data.
     hostname: rabbitmq
     ports:
-      - "5672:5672"    # AMQP — exposed for remote clients, unaffected by servers/reverse-proxy
-      # Management UI. Host bind address defaults to every interface, same
-      # as before; set CLTL_RABBITMQ_MGMT_BIND=127.0.0.1 in config/servers.env
-      # when servers/reverse-proxy fronts this checkout, so the raw port is
-      # no longer reachable from outside this host.
+      # AMQP. Published on every interface so a client deployment on another
+      # machine can reach it, and unaffected by modules/reverse-proxy: no
+      # HTTP proxy can add TLS or auth to AMQP (its auth is in-protocol SASL).
+      - "5672:5672"
+      # Management UI. Host bind address defaults to every interface; set
+      # CLTL_RABBITMQ_MGMT_BIND=127.0.0.1 in this checkout's env file when
+      # modules/reverse-proxy fronts it, so the raw port is no longer
+      # reachable from outside this host.
       - "${CLTL_RABBITMQ_MGMT_BIND:-0.0.0.0}:15672:15672"
     environment:
       - RABBITMQ_DEFAULT_USER=eliza
@@ -35,10 +45,15 @@ services:
       interval: 10s
       timeout: 10s
       retries: 6
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cltl-platform
 
 networks:
   cltl-platform:
-    name: cltl-platform
+    # Named after the Compose project so two deployments on one machine get
+    # separate networks by setting CLTL_PROJECT alone. The default,
+    # cltl-platform, is the name custom-module/ joins as an external network.
+    name: ${CLTL_PROJECT:-cltl-platform}
     driver: bridge

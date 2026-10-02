@@ -1,4 +1,4 @@
-# The public HTTP surface of a server checkout, routed by path to the three
+# The public HTTP surface of a server deployment, routed by path to the three
 # HTTP services this platform exposes. AMQP is deliberately absent — see the
 # comment at the top of ./docker-compose.yml for why no reverse proxy can
 # help there.
@@ -20,11 +20,11 @@
 
 {$CLTL_HOSTNAME} {
 	# ---------------------------------------------------------------------
-	# The storage API (cltl-backend, servers/eliza).
+	# The storage API (modules/backend).
 	#
 	# NOT stripped: the service is already mounted at /storage inside its
 	# own container (werkzeug DispatcherMiddleware), so
-	# `http://eliza-backend:8000/storage/image/x` is the real upstream path
+	# `http://backend:8000/storage/image/x` is the real upstream path
 	# and this proxy must pass it through unchanged. `handle`, not
 	# `handle_path`, is what makes that so.
 	# ---------------------------------------------------------------------
@@ -32,11 +32,11 @@
 		basic_auth {
 			import /etc/caddy/secrets/basic_auth.auth
 		}
-		reverse_proxy eliza-backend:8000
+		reverse_proxy backend:8000
 	}
 
 	# ---------------------------------------------------------------------
-	# The EMISSOR data API (cltl-emissor-data, servers/emissor). Same
+	# The EMISSOR data API (modules/emissor). Same
 	# already-mounted-at-/emissor shape as storage above.
 	# ---------------------------------------------------------------------
 	handle /emissor/* {
@@ -47,7 +47,7 @@
 	}
 
 	# ---------------------------------------------------------------------
-	# The RabbitMQ management UI (servers/broker). `management.path_prefix`
+	# The RabbitMQ management UI (modules/broker). `management.path_prefix`
 	# in config/rabbitmq-management.conf is what makes the UI itself work
 	# under a path rather than at a host root; without it the page loads and
 	# every asset 404s.

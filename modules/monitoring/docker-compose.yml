@@ -1,36 +1,39 @@
-# One tenant's monitoring view: a per-scenario page (image, transcript,
-# detected faces) that clients/chat-ui's Monitoring tab can embed.
+# The monitoring view: a per-scenario page (image, transcript, detected
+# faces) that modules/chat-ui's Monitoring tab can embed.
 #
-# Optional and independent — it does not depend_on clients/backend, only on
-# the Leolani server (CLTL_SERVER_HOST) being reachable, same as every other
-# clients/* stack assumes.
+# Optional and independent — no depends_on of its own; it only needs the
+# broker reachable at [cltl.event.kombu] server, like every other module.
 #
-#   docker compose --env-file ../../config/clients.env -f docker-compose.yml up -d --wait --pull always
+#   docker compose --env-file ../../config/<role>.env -f docker-compose.yml up -d --wait --pull always
 #
-# Reads CLTL_TENANT and CLTL_MONITORING_PORT from ../../config/clients.env.
-#
-# To also show this in clients/chat-ui's Monitoring tab, uncomment and set
-# CLTL_MONITORING_URL in that same config/clients.env (bare origin, no path —
-# the chat UI frontend appends /static/monitoring.html itself), and add this
-# file's `-f` alongside clients/chat-ui's own command. Leaving it commented
-# out/empty leaves the tab out.
+# To show it in modules/chat-ui's Monitoring tab, set [cltl.chat-ui]
+# monitoring_url in config/custom.config to a bare, browser-reachable origin
+# matching CLTL_MONITORING_PORT below (the chat UI frontend appends
+# /static/monitoring.html itself), and add this file's `-f` alongside
+# chat-ui's. Left empty, the tab is simply not shown — which is safer than a
+# tab whose iframe cannot load.
 
-name: cltl-platform-client-${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
+name: ${CLTL_PROJECT:-cltl-platform}
 
 services:
   monitoring:
     image: ghcr.io/leolani/cltl-monitoring:${VERSION:-latest}
     restart: "no"
     ports:
-      - "${CLTL_MONITORING_PORT:?set a distinct host port per tenant, e.g. 8005 for tenant-a and 8006 for tenant-b}:8000"
+      - "${CLTL_MONITORING_PORT:-8005}:8000"
     volumes:
       - ../../config/default.config:/cltl-monitoring/config/default.config:ro
       - ../../config/custom.config:/cltl-monitoring/config/custom.config:ro
       - ../../config/logging.config:/cltl-monitoring/config/logging.config:ro
       - ../../storage:/cltl-monitoring/storage
     environment:
-      - CLTL_TENANT=${CLTL_TENANT:?set CLTL_TENANT to this client's tenant id, e.g. tenant-a}
-      - CLTL_SERVER_HOST=${CLTL_SERVER_HOST:-host.docker.internal}
       - CLTL_LOGGING_CONFIG=/cltl-monitoring/config/logging.config
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: ${CLTL_PROJECT:-cltl-platform}
+    driver: bridge
