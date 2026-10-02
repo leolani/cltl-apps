@@ -1,26 +1,38 @@
 # config/ — generated, not tracked
 
-This directory is empty until you populate it. This checkout is meant to be
-dedicated to exactly one deployment (a server, a client/tenant, or a
-standalone module) — see [`../doc/DEPLOYMENT.md`](../doc/DEPLOYMENT.md) — so
-there is no single default config that would be correct for every checkout.
+This directory is empty until you populate it. Every module in this checkout
+bind-mounts the same three files from here, so what is in this directory is
+what decides which deployment this checkout is — see
+[`../doc/DEPLOYMENT.md`](../doc/DEPLOYMENT.md).
 
-To configure this checkout, copy the template matching its role:
+Populate it with the shared baseline plus exactly one role:
 
 ```bash
-cp ../templates/server/config/* config/    # for servers/*
+cp templates/common/config/* templates/standalone/config/* config/   # everything, one machine, no tenant
 # or
-cp ../templates/client/config/* config/    # for clients/*
+cp templates/common/config/* templates/server/config/* config/       # the shared, untenanted half
+# or
+cp templates/common/config/* templates/client/config/* config/       # one tenant's user-facing half
 ```
 
-(paths above are relative to this `config/` directory — run the `cp` from
-the repository root instead, e.g. `cp templates/server/config/* config/`).
+(run these from the repository root, not from inside `config/`)
 
-Then edit the copied `custom.config`/`clients.env`/`servers.env` for this
-specific deployment (tenant id, ports, `CLTL_SERVER_HOST`, …) — see
-`doc/DEPLOYMENT.md` for what to change for each scenario.
+That leaves four files here:
 
-Nothing under here except this file and `.gitignore` is version-controlled:
-a live deployment's tenant id, ports, and any local overrides have no
-business in this repo's history, and `templates/` stays the single place a
-platform-wide change (e.g. a topic rename) is made once.
+| File | What it is |
+|---|---|
+| `default.config` | The platform baseline, identical for every role. Change it only for a platform-wide default, like a topic name |
+| `logging.config` | Log levels and formatting, identical for every role |
+| `custom.config` | **What makes this checkout its role** — the handful of keys that differ, plus anything specific to this one deployment (tenant id, where the server is) |
+| `<role>.env` | The values Compose needs before any container exists: image tag, published ports, project name |
+
+The role lives in `custom.config`, not in which modules you happen to run:
+`templates/server/config/custom.config` and
+`templates/client/config/custom.config` differ from the standalone baseline
+in about six keys each, and reading those two files side by side is the
+shortest description of what "server" and "client" actually mean here.
+
+Nothing under this directory except this file and `.gitignore` is
+version-controlled: a live deployment's tenant id, ports and local overrides
+have no business in this repository's history, and `templates/` stays the one
+place a platform-wide change is made.
