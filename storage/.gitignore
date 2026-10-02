@@ -1,7 +1,5 @@
+# Keep the directory layout, ignore everything stored in it
 *
-*/
+!*/
 !.gitignore
-!audio/
-!audio/.gitkeep
-!rabbitmq/
-!rabbitmq/.gitkeep
+!.gitkeep
