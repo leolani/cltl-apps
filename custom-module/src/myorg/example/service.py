@@ -214,7 +214,7 @@ class ExampleService:
                 "'%s.#', which under kombu matches every tenant on the "
                 "exchange, and it will process and answer every one of them. "
                 "That is correct for a single-tenant deployment and wrong for "
-                "a shared broker. Set [cltl.event.kombu] tenant (or "
+                "a shared event bus. Set [cltl.event.kombu] tenant (or "
                 "$CLTL_TENANT) to this deployment's id — one lowercase "
                 "routing-key word, ^[a-z0-9][a-z0-9_-]*$. Starting anyway; "
                 "see docs/tenancy.md.", self._input_topic)

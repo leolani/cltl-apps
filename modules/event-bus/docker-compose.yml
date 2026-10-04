@@ -1,13 +1,13 @@
-# The platform's message broker: RabbitMQ, plus the Docker network that every
+# The platform's event bus: RabbitMQ, plus the Docker network that every
 # module in THIS deployment shares. Start it first — modules/eliza,
 # modules/vad-asr, modules/emissor and modules/reverse-proxy each declare
 # `depends_on: rabbitmq: condition: service_healthy`, which Compose can only
 # resolve for a service defined in the same merged project:
 #
-#   docker compose -f modules/broker/docker-compose.yml up -d --wait --pull always
+#   docker compose -f modules/event-bus/docker-compose.yml up -d --wait --pull always
 #
-# A client deployment does NOT run this module: it reaches the server's
-# broker over AMQP, set as [cltl.event.kombu] server in config/custom.config.
+# A tenant deployment does NOT run this module: it reaches the server's
+# event bus over AMQP, set as [cltl.event.kombu] server in config/custom.config.
 # A server or standalone deployment runs exactly one of it.
 #
 # `name:` interpolates identically in every modules/* compose file, so
@@ -22,10 +22,10 @@ services:
     image: "rabbitmq:3.12-management"
     # Load-bearing: RabbitMQ derives its node name and mnesia directory
     # (storage/rabbitmq/mnesia/rabbit@rabbitmq) from this. Changing it
-    # orphans an existing broker's data.
+    # orphans an existing event bus's data.
     hostname: rabbitmq
     ports:
-      # AMQP. Published on every interface so a client deployment on another
+      # AMQP. Published on every interface so a tenant deployment on another
       # machine can reach it, and unaffected by modules/reverse-proxy: no
       # HTTP proxy can add TLS or auth to AMQP (its auth is in-protocol SASL).
       - "5672:5672"

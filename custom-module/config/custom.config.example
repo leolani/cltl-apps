@@ -1,11 +1,11 @@
-# Copy this to config/custom.config (gitignored — never commit it) to point
-# the standalone `python src/main.py` at a real deployment's broker instead of
+# Copy this to config/custom.config (gitignored — never commit it) to point the
+# standalone `python src/main.py` at a real deployment's event bus instead of
 # the in-process default. Written against a cltl-apps checkout's modules/ (see
 # ../../doc/DEPLOYMENT.md); the ports below are modules/backend's storage API
 # (8001) and modules/chat-ui's, reached from OUTSIDE the deployment's Docker
 # network.
 #
-#   docker compose -f ../../modules/broker/docker-compose.yml \
+#   docker compose -f ../../modules/event-bus/docker-compose.yml \
 #                   -f ../../modules/backend/docker-compose.yml \
 #                   -f ../../modules/eliza/docker-compose.yml up -d --wait
 #   cp config/custom.config.example config/custom.config

@@ -2,7 +2,7 @@
 # faces) that modules/chat-ui's Monitoring tab can embed.
 #
 # Optional and independent — no depends_on of its own; it only needs the
-# broker reachable at [cltl.event.kombu] server, like every other module.
+# event bus reachable at [cltl.event.kombu] server, like every other module.
 #
 #   docker compose --env-file ../../config/<role>.env -f docker-compose.yml up -d --wait --pull always
 #

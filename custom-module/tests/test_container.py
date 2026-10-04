@@ -47,7 +47,7 @@ class _InProcessContainer(ExampleContainer):
     `event_bus` is overridden rather than merely configured because
     `KombuEventBusContainer.event_bus` is a plain, non-`@singleton` property —
     every access would otherwise construct a fresh, real AMQP connection, and
-    would hang this test suite on a machine with no broker.
+    would hang this test suite on a machine with no event bus.
 
     `resource_manager` is deliberately left alone: `ThreadedResourceContainer`
     is in-process and free, and letting the real one run is what makes this

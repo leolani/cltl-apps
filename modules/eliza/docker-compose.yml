@@ -5,10 +5,10 @@
 # a tenant would scope it to one tenant's traffic — see
 # ../../doc/DEPLOYMENT.md#tenancy.
 #
-# Needs modules/broker in the same invocation (the depends_on below only
+# Needs modules/event-bus in the same invocation (the depends_on below only
 # resolves for a service defined in the same merged project):
 #
-#   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
+#   docker compose -f ../event-bus/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 #
 # The storage service that used to live in this file as `eliza-backend` is
 # now modules/backend. It was always the same cltl-backend image; whether it

@@ -34,7 +34,7 @@ class EchoExample(Example):
             # this module cannot hear itself there. It IS reachable the moment
             # someone edits config/default.config to point topic_output at
             # topic_input to see a quick round trip: without this guard that
-            # edit is an infinite loop that saturates the broker in seconds.
+            # edit is an infinite loop that saturates the event bus in seconds.
             return None
 
         return f"{self._prefix} {text.upper()}{MARKER}"

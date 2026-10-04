@@ -2,7 +2,7 @@
 
 `custom-module/` at the repository root is the full worked example for
 attaching your own code to a running Leolani deployment. It isn't "a
-deployment" the way the `standalone/`, `server/` and `client/` templates
+deployment" the way the `standalone/`, `server/` and `tenant/` templates
 beside this one are, so there is no config bundle here to copy into a
 checkout's `config/`.
 

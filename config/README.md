@@ -12,7 +12,7 @@ cp templates/common/config/* templates/standalone/config/* config/   # everythin
 # or
 cp templates/common/config/* templates/server/config/* config/       # the shared, untenanted half
 # or
-cp templates/common/config/* templates/client/config/* config/       # one tenant's user-facing half
+cp templates/common/config/* templates/tenant/config/* config/       # one tenant's user-facing half
 ```
 
 (run these from the repository root, not from inside `config/`)
@@ -28,9 +28,9 @@ That leaves four files here:
 
 The role lives in `custom.config`, not in which modules you happen to run:
 `templates/server/config/custom.config` and
-`templates/client/config/custom.config` differ from the standalone baseline
+`templates/tenant/config/custom.config` differ from the standalone baseline
 in about six keys each, and reading those two files side by side is the
-shortest description of what "server" and "client" actually mean here.
+shortest description of what "server" and "tenant" actually mean here.
 
 Nothing under this directory except this file and `.gitignore` is
 version-controlled: a live deployment's tenant id, ports and local overrides

@@ -5,7 +5,7 @@
 # container joins the SAME network:
 #
 #   docker compose --env-file ../../config/standalone.env \
-#                   -f ../../modules/broker/docker-compose.yml \
+#                   -f ../../modules/event-bus/docker-compose.yml \
 #                   -f ../../modules/backend/docker-compose.yml \
 #                   -f ../../modules/eliza/docker-compose.yml \
 #                   -f ../../modules/context/docker-compose.yml up -d --wait
@@ -21,7 +21,7 @@
 # deployment, leave CLTL_TENANT unset.
 #
 # Against a different deployment entirely, point CLTL_SERVER_NETWORK,
-# CLTL_AMQP_URL and CLTL_STORAGE_URL at its own broker/network/storage
+# CLTL_AMQP_URL and CLTL_STORAGE_URL at its own event bus/network/storage
 # instead — nothing below is cltl-apps-specific except the defaults.
 
 name: cltl-example-module-${CLTL_TENANT:-untenanted}
@@ -58,17 +58,18 @@ services:
     volumes:
       # One FILE, not the directory every platform module mounts over its own
       # config/. The deployment's config carries [cltl.event] implementation:
-      # kombu and the broker address — every service in that deployment shares
-      # it — but it has no [myorg.example] section, because the deployment
-      # does not know about this template. This image's own config/default.config
-      # supplies it (see the Dockerfile), so only the connection overlay needs
-      # to come from outside, and it lands on custom.config because the loader
-      # reads that as an overlay ON TOP of default.config.
+      # kombu and the event bus address — every service in that deployment
+      # shares it — but it has no [myorg.example] section, because the
+      # deployment does not know about this template. This image's own
+      # config/default.config supplies it (see the Dockerfile), so only the
+      # connection overlay needs to come from outside, and it lands on
+      # custom.config because the loader reads that as an overlay ON TOP of
+      # default.config.
       #
       # Source is a running checkout's flat config/ directory, which carries
-      # the [cltl.event.kombu] section — broker address and tenant — that
+      # the [cltl.event.kombu] section — event bus address and tenant — that
       # this module needs to join the same bus. See
-      # templates/client/config/custom.config (tenanted) or
+      # templates/tenant/config/custom.config (tenanted) or
       # templates/standalone/config/custom.config (untenanted).
       - ${CLTL_DEMO_CONFIG:?set to a running checkout's config directory, e.g. ../../config}/custom.config:/cltl-example/config/custom.config:ro
     networks:
@@ -77,9 +78,9 @@ services:
 
 networks:
   server:
-    # The platform's network, created by modules/broker and shared by every
+    # The platform's network, created by modules/event-bus and shared by every
     # module in that deployment. Joining it is how this container reaches the
-    # broker; it is not what scopes it to a tenant. It is named after the
+    # event bus; it is not what scopes it to a tenant. It is named after the
     # deployment's CLTL_PROJECT, whose default is cltl-platform.
     name: ${CLTL_SERVER_NETWORK:-cltl-platform}
     external: true

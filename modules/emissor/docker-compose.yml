@@ -4,10 +4,10 @@
 # Untenanted — with no tenant configured it binds `<topic>.#` and so captures
 # every tenant's interaction data into one store.
 #
-# Needs modules/broker in the same invocation (the depends_on below only
+# Needs modules/event-bus in the same invocation (the depends_on below only
 # resolves for a service defined in the same merged project):
 #
-#   docker compose -f ../broker/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
+#   docker compose -f ../event-bus/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
 
 name: ${CLTL_PROJECT:-cltl-platform}
 

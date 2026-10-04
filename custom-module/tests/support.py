@@ -90,10 +90,10 @@ def fake_image_loader(images: Mapping[str, Optional[np.ndarray]]):
 
     The production loader is three lines around `ClientImageSource` (see
     `ExampleService._storage_loader`); this is what makes the service testable
-    without a broker AND without an HTTP server, which is the reason the loader
-    is injected at all. A url mapped to None raises, standing in for pixels
-    that were never stored — the chat UI's upload of them is best-effort, so
-    that case is not hypothetical.
+    without an event bus AND without an HTTP server, which is the reason the
+    loader is injected at all. A url mapped to None raises, standing in for
+    pixels that were never stored — the chat UI's upload of them is
+    best-effort, so that case is not hypothetical.
     """
     def load(url: str) -> np.ndarray:
         if url not in images:

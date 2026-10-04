@@ -5,7 +5,7 @@
 # when, and only when, this deployment is public:
 #
 #   docker compose --env-file config/server.env \
-#       -f modules/broker/docker-compose.yml \
+#       -f modules/event-bus/docker-compose.yml \
 #       -f modules/backend/docker-compose.yml \
 #       -f modules/eliza/docker-compose.yml \
 #       -f modules/vad-asr/docker-compose.yml \
@@ -17,10 +17,10 @@
 # (5672) is NOT part of this: AMQP's auth is in-protocol SASL negotiated at
 # connect time, so no HTTP reverse proxy can add anything to it, and stock
 # caddy cannot proxy raw TCP at all. It keeps its existing plain binding;
-# TLS for the broker itself is a separate, bigger decision for later.
+# TLS for the event bus itself is a separate, bigger decision for later.
 #
 # One service here (`rabbitmq`) is not new — it is a partial override of the
-# same service modules/broker/docker-compose.yml already defines. Compose
+# same service modules/event-bus/docker-compose.yml already defines. Compose
 # concatenates list fields (like `volumes`) across merged -f files for a
 # service of the same name, so this file only ever adds the one extra mount
 # below; it changes nothing when this file is left out of the invocation.
@@ -71,7 +71,7 @@ services:
     volumes:
       # management.path_prefix = /rabbitmq — without it the management UI's
       # own page loads under a proxied path but every asset it links resolves
-      # to the host root and 404s. modules/broker/docker-compose.yml mounts
+      # to the host root and 404s. modules/event-bus/docker-compose.yml mounts
       # no rabbitmq.conf of its own, so this is the only one RabbitMQ reads.
       - ../../modules/reverse-proxy/rabbitmq-management.conf:/etc/rabbitmq/rabbitmq.conf:ro
 

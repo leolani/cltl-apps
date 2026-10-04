@@ -47,7 +47,7 @@
 	}
 
 	# ---------------------------------------------------------------------
-	# The RabbitMQ management UI (modules/broker). `management.path_prefix`
+	# The RabbitMQ management UI (modules/event-bus). `management.path_prefix`
 	# in config/rabbitmq-management.conf is what makes the UI itself work
 	# under a path rather than at a host root; without it the page loads and
 	# every asset 404s.

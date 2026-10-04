@@ -11,11 +11,11 @@ the quickest way to understand this repository:
    `docker-compose.yml` you add to a bring-up command with `-f`. They are
    uniform: same project name, same network, same config mounts.
 2. **How the deployment is laid out.** Everything on one machine, or split
-   into a shared server plus one client per tenant. This is decided by
-   `config/`, not by which modules exist — see
+   into a shared server plus one tenant deployment per person. This is
+   decided by `config/`, not by which modules exist — see
    [`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md).
 
-A module is not inherently a "server" or a "client" module. `modules/backend`
+A module is not inherently a "server" or a "tenant" module. `modules/backend`
 is literally the same image and the same compose file in every deployment;
 whether it holds the audio/image store or forwards to another one that does
 is a value in `config/custom.config`.
@@ -25,7 +25,7 @@ is a value in `config/custom.config`.
 ```
 cltl-apps/
 ├── modules/           the platform's modules — one compose file each
-│   ├── broker/          RabbitMQ + this deployment's Docker network
+│   ├── event-bus/       RabbitMQ + this deployment's Docker network
 │   ├── backend/         storage API + host microphone/camera proxy
 │   ├── eliza/           the ELIZA dialogue engine
 │   ├── vad-asr/         voice activity detection + speech recognition
@@ -38,7 +38,7 @@ cltl-apps/
 │   ├── common/         the platform baseline, shared by every role
 │   ├── standalone/     everything on one machine, no tenant
 │   ├── server/         the shared, untenanted half
-│   ├── client/         one tenant's user-facing half
+│   ├── tenant/         one tenant's user-facing half
 │   └── module/         pointer at custom-module/, see below
 ├── custom-module/    template: attach your own code via the event bus
 ├── config/           THIS checkout's own config — generated, not tracked;
@@ -51,28 +51,29 @@ cltl-apps/
 
 | Module | Used by | What it does |
 |---|---|---|
-| `broker` | standalone, server | RabbitMQ, and the Docker network the deployment's modules share. Everything else talks through it |
+| `event-bus` | standalone, server | RabbitMQ, and the Docker network the deployment's modules share. Everything else talks through it |
 | `backend` | **all** | The `/storage` HTTP API and the proxy for the host's microphone/camera server. One container, both facets, selected by config |
 | `eliza` | standalone, server | The ELIZA dialogue engine: consumes `text_in`, publishes `text_out` |
 | `vad-asr` | standalone, server | Voice activity detection feeding speech recognition. One module, since nothing wants VAD without ASR |
 | `emissor` | standalone, server | Records interaction data to `storage/emissor` and serves it over REST |
-| `context` | standalone, client | Opens and closes the conversation scenario, without which the chat UI renders nothing |
-| `chat-ui` | standalone, client | The web chat UI — and the only input channel in a text-only deployment |
-| `monitoring` | standalone, client | Optional per-scenario view (image, transcript, faces), embedded as a chat-ui tab |
+| `context` | standalone, tenant | Opens and closes the conversation scenario, without which the chat UI renders nothing |
+| `chat-ui` | standalone, tenant | The web chat UI — and the only input channel in a text-only deployment |
+| `monitoring` | standalone, tenant | Optional per-scenario view (image, transcript, faces), embedded as a chat-ui tab |
 | `reverse-proxy` | server (optional) | Caddy: TLS on `:443` and Basic Auth over storage, EMISSOR and the RabbitMQ UI |
 
 "Used by" is a convention, not a constraint: it says which deployments
-normally include a module, not which ones are able to. `modules/broker` is
-absent from a client deployment only because a client reaches the server's
-broker instead of running its own.
+normally include a module, not which ones are able to. `modules/event-bus` is
+absent from a tenant deployment only because a tenant reaches the server's
+event bus instead of running its own.
 
 Two rules bind the list together. Anything with a `depends_on` needs the
 module it names in the **same** `-f` invocation — Compose can only resolve a
 health condition for a service in the same merged project, so `eliza`,
 `vad-asr`, `emissor` and `reverse-proxy` must be brought up alongside
-`broker`, and `context` and `chat-ui` alongside `backend`. And `--pull always`
-matters on every command below, because `VERSION` is a moving tag (`:latest`
-by default): without it Compose is content with a stale cached image.
+`event-bus`, and `context` and `chat-ui` alongside `backend`. And `--pull
+always` matters on every command below, because `VERSION` is a moving tag
+(`:latest` by default): without it Compose is content with a stale cached
+image.
 
 ## Example setups
 
@@ -88,7 +89,7 @@ cp templates/common/config/* templates/standalone/config/* config/
 ./modules/backend/run_host_server.sh &   # host mic server; skip for text-only
 
 docker compose --env-file config/standalone.env \
-    -f modules/broker/docker-compose.yml \
+    -f modules/event-bus/docker-compose.yml \
     -f modules/backend/docker-compose.yml \
     -f modules/eliza/docker-compose.yml \
     -f modules/vad-asr/docker-compose.yml \
@@ -102,40 +103,40 @@ Nothing to edit: every module is in one Compose project, so they reach each
 other by service name, and with no tenant set they all publish on bare
 routing keys and bind `<topic>.#`.
 
-### A shared server, with separate clients
+### A shared server, with separate tenants
 
 Two checkouts, because the two halves have different `config/`. The server
-runs untenanted and serves everyone; each client is one tenant:
+runs untenanted and serves everyone; each tenant is its own checkout:
 
 ```bash
 # the server
 git clone https://github.com/leolani/cltl-apps.git cltl-server && cd cltl-server
 cp templates/common/config/* templates/server/config/* config/
 docker compose --env-file config/server.env \
-    -f modules/broker/docker-compose.yml \
+    -f modules/event-bus/docker-compose.yml \
     -f modules/backend/docker-compose.yml \
     -f modules/eliza/docker-compose.yml \
     -f modules/vad-asr/docker-compose.yml \
     -f modules/emissor/docker-compose.yml up -d --wait --pull always
 cd ..
 
-# one tenant's client
-git clone https://github.com/leolani/cltl-apps.git cltl-client-a && cd cltl-client-a
-cp templates/common/config/* templates/client/config/* config/
+# one tenant
+git clone https://github.com/leolani/cltl-apps.git cltl-tenant-a && cd cltl-tenant-a
+cp templates/common/config/* templates/tenant/config/* config/
 # config/custom.config already points at host.docker.internal, which reaches
-# the server checkout above on this same machine. Set CLTL_TENANT's value
+# the server checkout above on this same machine. Set the `tenant` key
 # there for a tenant other than tenant-a, or a real hostname for a server
 # on another machine.
 ./modules/backend/run_host_server.sh &
 
-docker compose --env-file config/client.env \
+docker compose --env-file config/tenant.env \
     -f modules/backend/docker-compose.yml \
     -f modules/context/docker-compose.yml \
     -f modules/chat-ui/docker-compose.yml \
     -f modules/monitoring/docker-compose.yml up -d --wait --pull always
 ```
 
-A second tenant is another client checkout with its own tenant id, its own
+A second tenant is another checkout with its own tenant id, its own
 `CLTL_PROJECT` and its own ports. See
 [`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for that, for a genuinely remote
 server, and for putting `modules/reverse-proxy` in front of a public one.
@@ -147,7 +148,7 @@ opening consent question before anything else, or nothing responds.
 
 | Port | Service | Set by |
 |---|---|---|
-| 5672 | RabbitMQ AMQP (`modules/broker`) | fixed |
+| 5672 | RabbitMQ AMQP (`modules/event-bus`) | fixed |
 | 15672 | RabbitMQ management UI (`eliza` / `eliza123`) | fixed |
 | 8001 | Storage API (`modules/backend`) | `CLTL_BACKEND_PORT` |
 | 8002 | EMISSOR data API (`modules/emissor`) | fixed |
@@ -155,8 +156,8 @@ opening consent question before anything else, or nothing responds.
 | 8005 | Monitoring view (`modules/monitoring`) | `CLTL_MONITORING_PORT` |
 | 8000 | Host microphone server (`leoserv`, on the host, not in Docker) | fixed |
 
-In the split layout a client's `backend` moves to 9001 (`CLTL_BACKEND_PORT`
-in `config/client.env`), because 8001 is already taken by the server
+In the split layout a tenant's `backend` moves to 9001 (`CLTL_BACKEND_PORT`
+in `config/tenant.env`), because 8001 is already taken by the server
 checkout's own.
 
 ## Attaching your own code

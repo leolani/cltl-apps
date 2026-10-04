@@ -93,8 +93,8 @@ none of their own; against this platform there always is one, so
 | | You run | You get | You need |
 |---|---|---|---|
 | **Notebook** | `custom-module.ipynb` | An interactive, cell-by-cell look at subscribing and publishing on the bus | a Python 3.10 venv, `pip install -r requirements.notebook.txt jupyterlab`, and a full tenant already running (see below) |
-| **Component** | `src/main.py` | A packaged, tested, installable module, run standalone against a real deployment's broker | a Python 3.10 venv, `pip install -r requirements.txt` |
-| **Container** | `compose/example.compose.yml` | Runs inside the deployment like any platform module | `../modules/broker` (+ whichever other modules the deployment needs) and `../modules/context` already running |
+| **Component** | `src/main.py` | A packaged, tested, installable module, run standalone against a real deployment's event bus | a Python 3.10 venv, `pip install -r requirements.txt` |
+| **Container** | `compose/example.compose.yml` | Runs inside the deployment like any platform module | `../modules/event-bus` (+ whichever other modules the deployment needs) and `../modules/context` already running |
 
 All three attach to an **already-running** deployment — this repository
 builds no deployment of its own. See

@@ -57,7 +57,7 @@ git clone git@github.com:leolani/cltl-apps.git
 **One checkout plays one role.** Every walkthrough below needs this
 repository cloned *twice* — once configured as the server, once as a client
 — even when both run on the same machine; see
-[`doc/DEPLOYMENT.md`](DEPLOYMENT.md#one-checkout-per-deployment) for why.
+[`doc/DEPLOYMENT.md`](DEPLOYMENT.md#choosing-a-layout) for why.
 The clone command above is the same either way — which role a checkout plays
 comes from which `templates/` directory you copy into its `config/`, shown
 in the walkthroughs below.
@@ -114,7 +114,7 @@ The modules are available as Docker images:
 - context (ghcr.io/leolani/cltl-context): creates a new interaction scenario and stops it
 - chat-ui (ghcr.io/leolani/cltl-chat-ui): browser chat interface to enter and display text messages
 
-*Event-bus-server side* (`modules/broker`, `modules/backend`, `modules/emissor`, plus a communication module):
+*Event-bus-server side* (`modules/event-bus`, `modules/backend`, `modules/emissor`, plus a communication module):
 - rabbitmq (rabbitmq:3.12-management): keeps track of incoming and outgoing messages
 - backend (ghcr.io/leolani/cltl-backend): the very same module as above — one container runs both the storage facet and the microphone-proxy facet, and configuration decides which are live. A split deployment therefore runs `modules/backend` on both sides, serving storage on the server and proxying audio on the client
 - emissor (ghcr.io/leolani/cltl-emissor-data): saving the scenario and signal data to disk
@@ -131,7 +131,7 @@ Each directory under `modules/` contains a ```docker-compose.yml``` file that de
 `templates/common/` plus `templates/server/`):
 ```commandline
 docker compose --env-file config/server.env \
-                -f modules/broker/docker-compose.yml \
+                -f modules/event-bus/docker-compose.yml \
                 -f modules/backend/docker-compose.yml \
                 -f modules/eliza/docker-compose.yml up -d --wait --pull always
 ```
@@ -144,13 +144,13 @@ so, the latest version is pulled from the web. `--pull always` makes it check
 every time, since `VERSION` is a moving tag.
 
 **ii. Launch the client:** in a *separate* checkout (`config/` populated from
-`templates/common/` plus `templates/client/`) — see
+`templates/common/` plus `templates/tenant/`) — see
 [`DEPLOYMENT.md`](DEPLOYMENT.md) for why a split deployment needs two
 checkouts even on one machine, and for the standalone alternative that needs
 only one:
 
 ```commandline
-docker compose --env-file config/client.env \
+docker compose --env-file config/tenant.env \
     -f modules/backend/docker-compose.yml \
     -f modules/context/docker-compose.yml \
     -f modules/chat-ui/docker-compose.yml up -d --wait --pull always
@@ -227,7 +227,7 @@ In addition to the Docker images, this application also needs the following to r
 plus `modules/vad-asr`:
 ```commandline
 docker compose --env-file config/server.env \
-                -f modules/broker/docker-compose.yml \
+                -f modules/event-bus/docker-compose.yml \
                 -f modules/backend/docker-compose.yml \
                 -f modules/eliza/docker-compose.yml \
                 -f modules/vad-asr/docker-compose.yml up -d --wait --pull always
@@ -248,7 +248,7 @@ When that's running, bring up the client checkout's modules in another
 terminal (from the checkout's repository root):
 
 ```commandline
-docker compose --env-file config/client.env \
+docker compose --env-file config/tenant.env \
     -f modules/backend/docker-compose.yml \
     -f modules/context/docker-compose.yml \
     -f modules/chat-ui/docker-compose.yml up -d --wait --pull always

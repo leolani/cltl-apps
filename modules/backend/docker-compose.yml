@@ -14,13 +14,13 @@
 #
 #   standalone   both — holds the store AND proxies this machine's leoserv
 #   server       storage only — mic/image/tts topics left empty
-#   client       hardware I/O, forwarding storage to the server's backend
+#   tenant       hardware I/O, forwarding storage to the server's backend
 #
 # See ../../templates/ for those three configurations, and
 # ../../doc/DEPLOYMENT.md for which modules each deployment runs.
 #
-# Deliberately declares no `depends_on: rabbitmq`: a client deployment runs
-# this module with no local broker, and a depends_on naming a service absent
+# Deliberately declares no `depends_on: rabbitmq`: a tenant deployment runs
+# this module with no local event bus, and a depends_on naming a service absent
 # from the invocation makes Compose refuse to start at all.
 #
 #   ./run_host_server.sh &   # leoserv, on the host — skip for text-only
