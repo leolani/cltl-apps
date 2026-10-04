@@ -41,7 +41,7 @@ class ApplicationContainer(ExampleContainer):
     """This deployment: just the component. Scenario creation is not this
     template's job — it is the platform's own cltl-context, one per tenant,
     running in the deployment this module attaches to (see
-    ../../clients/context in a cltl-apps checkout, or the equivalent in
+    ../../modules/context in a cltl-apps checkout, or the equivalent in
     whatever deployment mounts this image). A standalone template used to
     carry its own throwaway scenario opener for exactly the deployments that
     had no cltl-context of their own; against this platform there always is
