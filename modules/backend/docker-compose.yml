@@ -48,12 +48,13 @@ services:
       - CLTL_LOGGING_CONFIG=/cltl-backend/config/logging.config
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      start_period: 30s
-      retries: 3
+    # No healthcheck here: the image ships its own (GET /health on 8000, the
+    # same 10s/5s/30s/3 this file used to restate), and modules/chat-ui,
+    # modules/context and modules/reverse-proxy wait on it with
+    # `condition: service_healthy`. Restating it here is what broke bring-up
+    # once: the restated test called curl, which the image dropped, so the
+    # container stayed unhealthy while /health answered fine. Every other
+    # module relies on its image's healthcheck; this one now does too.
     networks:
       - cltl-platform
 
