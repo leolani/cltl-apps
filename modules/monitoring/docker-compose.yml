@@ -6,12 +6,12 @@
 #
 #   docker compose --env-file ../../config/<role>.env -f docker-compose.yml up -d --wait --pull always
 #
-# To show it in modules/chat-ui's Monitoring tab, set [cltl.chat-ui]
-# monitoring_url in config/custom.config to a bare, browser-reachable origin
-# matching CLTL_MONITORING_PORT below (the chat UI frontend appends
-# /static/monitoring.html itself), and add this file's `-f` alongside
-# chat-ui's. Left empty, the tab is simply not shown — which is safer than a
-# tab whose iframe cannot load.
+# modules/chat-ui's Monitoring tab embeds it by default: [cltl.chat-ui]
+# monitoring_url ships set to http://localhost:8005, matching
+# CLTL_MONITORING_PORT below. So bring this file up alongside chat-ui's — or
+# empty that key in config/custom.config, which leaves the tab out rather
+# than showing one whose iframe cannot load. Moving the port means changing
+# both by hand: config files and env files do not expand each other.
 
 name: ${CLTL_PROJECT:-cltl-platform}
 

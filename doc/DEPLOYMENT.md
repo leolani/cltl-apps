@@ -34,8 +34,8 @@ same three config files, and sets the same `extra_hosts`.
 | `vad-asr` | `eliza-vad`, `eliza-asr` | Voice activity detection feeding speech recognition |
 | `emissor` | `eliza-emissor` | Records interaction data to `storage/emissor`, serves it over REST |
 | `context` | `context` | Opens and closes the conversation scenario; carries the BDI model and init intention |
-| `chat-ui` | `chatui` | The web chat UI |
-| `monitoring` | `monitoring` | Optional per-scenario view, embedded as a chat-ui tab |
+| `chat-ui` | `chatui` | The web chat UI, with the Image and Monitoring tabs beside the conversation |
+| `monitoring` | `monitoring` | Optional per-scenario view, embedded as the chat UI's Monitoring tab |
 | `reverse-proxy` | `caddy` (+ a `rabbitmq` override) | Optional TLS and Basic Auth in front of a public server |
 
 ### `modules/backend` is one module, not two
@@ -349,7 +349,8 @@ git clone https://github.com/leolani/cltl-apps.git cltl-tenant-b
 cd cltl-tenant-b
 cp templates/common/config/* templates/tenant/config/* config/
 
-# config/custom.config: tenant: tenant-b
+# config/custom.config: tenant: tenant-b, and monitoring_url on the new
+#                       monitoring port below
 # config/tenant.env:    CLTL_PROJECT=cltl-platform-tenant-b
 #                       distinct CLTL_BACKEND_PORT / CLTL_CHATUI_PORT /
 #                       CLTL_MONITORING_PORT
@@ -364,6 +365,12 @@ docker compose --env-file config/tenant.env \
 Distinct tenant, distinct `CLTL_PROJECT`, distinct host ports, same server.
 Each tenant is its own Compose project on its own network, so tearing one
 down never touches the other.
+
+The one port that is not purely a Compose matter is `CLTL_MONITORING_PORT`:
+`[cltl.chat-ui] monitoring_url` is the URL the **browser** uses to reach it,
+so moving the port and not repointing the URL leaves this tenant's Monitoring
+tab iframed onto tenant-a's view. See
+[The chat UI's two tabs](#the-chat-uis-two-tabs).
 
 ## A remote server
 
@@ -459,23 +466,70 @@ There is no tenant-side key for the EMISSOR data API: nothing in
 `templates/tenant/` consumes one, so `/emissor/*` behind the proxy is for
 direct access only (a script, a notebook).
 
-## Monitoring
+## The chat UI's two tabs
+
+The column beside the conversation is a tab strip, and both tabs are on in
+the shipped `templates/common/config/default.config`. `GET /chatui/config`
+tells the page which ones this deployment offers: a tab whose key is off is
+left out, a single remaining tab loses the strip, and neither leaves the
+column out.
+
+### Image upload
+
+`[cltl.chat-ui] image_upload: True` gives the chat UI an **Image** tab: a
+person uploads a picture, drags labelled rectangles over it and submits.
+
+Submitting PUTs the pixels to `[cltl.chat-ui] image_storage_url` and
+publishes **one** `ImageSignalEvent` on `[cltl.chat-ui.events] topic_image`,
+carrying a region per rectangle inside the signal rather than on a separate
+topic. It publishes nothing on `topic_utterance`, so **the agent does not
+answer a picture** — the image is echoed into the transcript, recorded by
+`modules/emissor` and shown in the Monitoring tab, and that is all. Nothing
+in this platform's module set interprets it; interpreting it is what
+`custom-module/` is for.
+
+`image_storage_url` is left empty on purpose, so that it falls back to
+`[cltl.backend] storage_url` — the value `modules/emissor` and
+`modules/monitoring` resolve the published `cltl-storage:image/<id>`
+reference against. Setting one without the other is how a scenario ends up
+recording a reference to pixels nothing can fetch. A tenant repoints
+`storage_url` at the server and the upload follows it, with no second value
+to keep in step.
+
+Note that `[cltl.chat-ui.events] topic_image` is not
+`[cltl.backend.image] topic`: the latter is the host camera, which every
+layout here leaves empty. The two publish the same kind of signal from
+different sources.
+
+To drop the tab, set `image_upload: False` in `config/custom.config`.
+
+### Monitoring
 
 `modules/monitoring` is a per-scenario view (image, transcript, detected
-faces) that `modules/chat-ui`'s Monitoring tab embeds in an iframe. Two
-independent switches:
+faces) that the chat UI's **Monitoring** tab embeds in an iframe. The tab is
+on in the shipped config — `[cltl.chat-ui] monitoring_url` is
+`http://localhost:8005` — so the switch to remember is the other one:
+include `-f modules/monitoring/docker-compose.yml`, or the tab is there with
+nothing behind it. Both layouts' commands above already include it.
 
-- include `-f modules/monitoring/docker-compose.yml` to run it;
-- set `[cltl.chat-ui] monitoring_url` in `config/custom.config` to show the
-  tab.
+To drop the tab instead, set `monitoring_url` empty in
+`config/custom.config`; it is then simply absent, which is safer than a tab
+whose iframe cannot load.
 
-Leave the URL empty (the shipped default) and the tab is simply absent, which
-is safer than a tab whose iframe cannot load. It must be a bare origin
-(`http://localhost:<CLTL_MONITORING_PORT>`, no path) reachable from the
-**browser** — not a Compose service name and not the server's host — because
-the chat UI frontend appends the page path itself. Keep it in step with
-`CLTL_MONITORING_PORT` by hand; config files and env files do not expand each
-other.
+The URL must be a bare origin (`http://localhost:<CLTL_MONITORING_PORT>`, no
+path) reachable from the **browser** — not a Compose service name and not the
+server's host — because the chat UI frontend appends the page path itself.
+Keep it in step with `CLTL_MONITORING_PORT` by hand; config files and env
+files do not expand each other, so a second tenant that moves that port must
+override `monitoring_url` as well.
+
+`[cltl.monitoring] active_interval` is `0` here, meaning every scenario is
+recorded whether or not anything is polling for it. The component's own
+default of 15 seconds suits a camera-fed deployment; it does not suit this
+one, because the two tabs share a strip. While a person annotates an image
+the Monitoring tab is hidden, nothing is polling, and the image they submit
+would be discarded on arrival with no replay — so the tab would be blank
+when they switched to it.
 
 ## Text-only (no host microphone server)
 
@@ -526,9 +580,22 @@ template has been copied into it yet.
 the one it depends on in the same `-f` invocation. See
 [What depends on what](#what-depends-on-what).
 
-**Monitoring tab missing or blank** — confirm `modules/monitoring` was
-included and is healthy, and that `[cltl.chat-ui] monitoring_url` is a bare,
-browser-reachable origin matching `CLTL_MONITORING_PORT`.
+**Monitoring tab missing or blank** — it is on by default, so blank almost
+always means `modules/monitoring` was left out of the `-f` list, or is
+unhealthy. Otherwise confirm `[cltl.chat-ui] monitoring_url` is a bare,
+browser-reachable origin matching this checkout's `CLTL_MONITORING_PORT` —
+a second tenant has to repoint it by hand.
+
+**Image tab missing** — `[cltl.chat-ui] image_upload` is off, or
+`external_input` is not `True`. Both are on in the shipped baseline, so this
+is a `config/custom.config` override.
+
+**An uploaded image appears in the transcript but nowhere else** — the agent
+is not meant to answer it (see [Image upload](#image-upload)). If it is also
+missing from the Monitoring tab and from `storage/emissor/`, the pixels never
+reached storage: check `[cltl.chat-ui] image_storage_url`, which should be
+empty so that it falls back to `[cltl.backend] storage_url`, and that
+`modules/backend` is reachable from the chat UI container.
 
 **Unexpanded environment variable in [section].key** — a `$VAR` in a config
 value with nothing in the environment to expand it. The platform warns and

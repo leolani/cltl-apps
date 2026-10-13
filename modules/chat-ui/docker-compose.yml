@@ -1,8 +1,18 @@
 # The web chat UI: the browser-facing text input and output channel, and the
 # sole input channel in a text-only deployment.
 #
-# Its Monitoring tab is an iframe onto modules/monitoring, shown only when
-# [cltl.chat-ui] monitoring_url is set in config/custom.config.
+# Beside the conversation it shows a tab strip, both tabs on in the shipped
+# config:
+#
+#   - Image      [cltl.chat-ui] image_upload — upload a picture, drag
+#                labelled regions over it, submit. The pixels are PUT to
+#                [cltl.backend] storage_url, so modules/backend serves this
+#                tab as well as being its depends_on.
+#   - Monitoring [cltl.chat-ui] monitoring_url — an iframe onto
+#                modules/monitoring, so bring that module up alongside this
+#                one, or empty the key in config/custom.config.
+#
+# A tab whose key is off is left out, and one remaining tab loses the strip.
 #
 # Needs modules/backend up and healthy (see depends_on below — bring both up
 # in one invocation, or have backend already running):

@@ -57,8 +57,8 @@ cltl-apps/
 | `vad-asr` | standalone, server | Voice activity detection feeding speech recognition. One module, since nothing wants VAD without ASR |
 | `emissor` | standalone, server | Records interaction data to `storage/emissor` and serves it over REST |
 | `context` | standalone, tenant | Opens and closes the conversation scenario, without which the chat UI renders nothing |
-| `chat-ui` | standalone, tenant | The web chat UI — and the only input channel in a text-only deployment |
-| `monitoring` | standalone, tenant | Optional per-scenario view (image, transcript, faces), embedded as a chat-ui tab |
+| `chat-ui` | standalone, tenant | The web chat UI — and the only input channel in a text-only deployment. Carries the Image and Monitoring tabs, both on by default |
+| `monitoring` | standalone, tenant | Optional per-scenario view (image, transcript, faces), embedded as the chat UI's Monitoring tab. Leave it out and set `monitoring_url` empty together |
 | `reverse-proxy` | server (optional) | Caddy: TLS on `:443` and Basic Auth over storage, EMISSOR and the RabbitMQ UI |
 
 "Used by" is a convention, not a constraint: it says which deployments
@@ -144,7 +144,11 @@ server, and for putting `modules/reverse-proxy` in front of a public one.
 ## Ports
 
 Chat UI: <http://localhost:8003/chatui/static/chat.html> — answer the agent's
-opening consent question before anything else, or nothing responds.
+opening consent question before anything else, or nothing responds. Beside
+the conversation are two tabs, both on by default: **Image**, to upload a
+picture and mark regions on it, and **Monitoring**, an iframe onto
+`modules/monitoring`. See
+[doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#the-chat-uis-two-tabs).
 
 | Port | Service | Set by |
 |---|---|---|
