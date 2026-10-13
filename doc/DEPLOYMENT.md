@@ -148,6 +148,7 @@ needs *before any container exists*:
 | `CLTL_PROJECT` | Compose project name, and the network name derived from it |
 | `CLTL_BACKEND_PORT`, `CLTL_CHATUI_PORT`, `CLTL_MONITORING_PORT` | published host ports |
 | `CLTL_STORAGE_BIND`, `CLTL_EMISSOR_BIND`, `CLTL_RABBITMQ_MGMT_BIND` | published bind addresses |
+| `CLTL_CONTEXT_START_DELAY` | seconds `context` waits before starting; see [The scenario-start race](#the-scenario-start-race) |
 | `CLTL_HOSTNAME`, `CLTL_ACME_EMAIL` | `reverse-proxy` only; caddy will not start without them |
 
 Everything the application itself reads — the tenant, where the event bus and
@@ -538,6 +539,40 @@ the Monitoring tab is hidden, nothing is polling, and the image they submit
 would be discarded on arrival with no replay — so the tab would be blank
 when they switched to it.
 
+## The scenario-start race
+
+`modules/context` opens the conversation scenario the moment it comes up, and
+nothing replays that event. `modules/emissor` subscribes a few seconds after
+its own container starts, and a scenario opened while it was still
+subscribing is one it never learns about: it logs
+
+```
+Skipping signal for stopped or unknown Scenario <id>
+```
+
+for every signal of that conversation and writes nothing — no `image.json`,
+no `text.json`, not even a scenario folder. The conversation works normally
+in the chat UI, so the only symptom is an empty `storage/emissor/`.
+
+The two containers start together in a standalone bring-up, and which one
+wins is a matter of two or three seconds. `modules/context` therefore sleeps
+before starting, `CLTL_CONTEXT_START_DELAY` seconds, 10 by default. Nothing
+`depends_on` context, so this only moves when context itself reports healthy;
+it does not hold up the rest of the bring-up.
+
+A `depends_on: eliza-emissor: condition: service_healthy` would be the honest
+instrument, and it is not available here: a tenant runs `context` with no
+local emissor, and Compose refuses to start a project whose `depends_on`
+names an absent service — `required: false` does not change that. It is the
+same constraint that keeps `depends_on: rabbitmq` out of `modules/backend`;
+see [What depends on what](#what-depends-on-what).
+
+Set `CLTL_CONTEXT_START_DELAY=0` to switch the delay off. That is reasonable
+on a tenant, whose emissor lives in a server deployment that came up long
+before. If you ever do hit the race, `docker compose … restart context`
+re-opens a scenario against an already-listening emissor and the next
+conversation records normally.
+
 ## Text-only (no host microphone server)
 
 Set the mic topic empty in `config/custom.config`:
@@ -586,6 +621,11 @@ template has been copied into it yet.
 **`depends_on` names an undefined service** — a module was brought up without
 the one it depends on in the same `-f` invocation. See
 [What depends on what](#what-depends-on-what).
+
+**Nothing in `storage/emissor/` after a conversation** — usually the
+scenario-start race, not a broken pipeline: `modules/emissor`'s log will show
+`Skipping signal for stopped or unknown Scenario`. See
+[The scenario-start race](#the-scenario-start-race).
 
 **Monitoring tab missing or blank** — it is on by default, so blank almost
 always means `modules/monitoring` was left out of the `-f` list, or is

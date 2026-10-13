@@ -12,6 +12,8 @@
 #
 #   docker compose --env-file ../../config/<role>.env \
 #       -f ../backend/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
+#
+# Starts a few seconds late on purpose; see the command override below.
 
 name: ${CLTL_PROJECT:-cltl-platform}
 
@@ -19,6 +21,34 @@ services:
   context:
     image: ghcr.io/leolani/cltl-context:${VERSION:-latest}
     restart: "no"
+    # Hold off before starting, because this module opens the scenario the
+    # moment it comes up and nothing replays that event. With
+    # [cltl.context] start_scenario set, src/main.py publishes the `init`
+    # intention about a second in; modules/emissor subscribes a few seconds
+    # after its own container starts, and if it is still subscribing it never
+    # sees ScenarioStarted. It then logs `Skipping signal for stopped or
+    # unknown Scenario` for every signal of that conversation and writes
+    # nothing at all — a whole run lost to a race of two or three seconds.
+    #
+    # A `depends_on: eliza-emissor: condition: service_healthy` would be the
+    # right instrument and is not available: a tenant deployment runs this
+    # module with no local emissor, and Compose refuses to start when
+    # depends_on names a service absent from the invocation — `required:
+    # false` does not help, it still fails validation. Same constraint as
+    # modules/backend's missing `depends_on: rabbitmq`.
+    #
+    # So: a delay, long enough to cover the observed gap several times over
+    # and short enough to stay inside this container's own 30s healthcheck
+    # start period. Nothing depends_on context, so this only moves when
+    # context itself reports healthy. Set CLTL_CONTEXT_START_DELAY=0 in the
+    # env file to switch it off — reasonable for a tenant, whose server-side
+    # emissor has been up for far longer than this.
+    #
+    # The cost is that this restates the image's own command. If a future
+    # image changes it, context will fail to start with a clear error; check
+    # with
+    #   docker inspect --format '{{json .Config.Cmd}}' ghcr.io/leolani/cltl-context:latest
+    command: ["sh", "-c", "sleep ${CLTL_CONTEXT_START_DELAY:-10}; exec python src/main.py"]
     volumes:
       - ../../config/default.config:/cltl-context/config/default.config:ro
       - ../../config/custom.config:/cltl-context/config/custom.config:ro
