@@ -32,7 +32,7 @@ same three config files, and sets the same `extra_hosts`.
 | `backend` | `backend` | The `/storage` HTTP API and the proxy for the host's microphone/camera server |
 | `eliza` | `eliza-eliza` | The ELIZA dialogue engine: consumes `text_in`, publishes `text_out` |
 | `vad-asr` | `eliza-vad`, `eliza-asr` | Voice activity detection feeding speech recognition |
-| `emissor` | `eliza-emissor` | Records interaction data to `storage/emissor`, serves it over REST |
+| `emissor` | `eliza-emissor` | Records interaction data to `storage/emissor` as it arrives, serves it over REST |
 | `context` | `context` | Opens and closes the conversation scenario; carries the BDI model and init intention |
 | `chat-ui` | `chatui` | The web chat UI, with the Image and Monitoring tabs beside the conversation |
 | `monitoring` | `monitoring` | Optional per-scenario view, embedded as the chat UI's Monitoring tab |
@@ -495,6 +495,13 @@ reference against. Setting one without the other is how a scenario ends up
 recording a reference to pixels nothing can fetch. A tenant repoints
 `storage_url` at the server and the upload follows it, with no second value
 to keep in step.
+
+Persisting it needs one more key, which the baseline also sets:
+`[cltl.emissor-data] flush_interval: 0`, writing each signal as it arrives.
+At the library's own default of `-1` the pixels still reach
+`storage/emissor/<scenario>/image/`, but the annotated signal that references
+them stays in memory until the scenario stops cleanly — and nothing a person
+can do in the chat UI stops one, so the record would simply never appear.
 
 Note that `[cltl.chat-ui.events] topic_image` is not
 `[cltl.backend.image] topic`: the latter is the host camera, which every
