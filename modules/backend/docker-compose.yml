@@ -7,13 +7,15 @@
 #   - hardware I/O — microphone, camera and text-to-speech, proxied from the
 #     host's microphone/camera server (leoserv; see run_host_server.sh, which
 #     cannot run in Docker because a container has no microphone). Each is
-#     switched off by leaving its topic empty in config.
+#     switched off by leaving its topic empty in config — the camera needs
+#     [cltl.backend.image] rate cleared too, since that is what decides
+#     whether a camera object exists at all.
 #
 # Which facets are live is purely configuration, which is why there is one
 # backend module and not a separate one per deployment role:
 #
 #   standalone   both — holds the store AND proxies this machine's leoserv
-#   server       storage only — mic/image/tts topics left empty
+#   server       storage only — mic/tts topics and the camera left empty
 #   tenant       hardware I/O, forwarding storage to the server's backend
 #
 # See ../../templates/ for those three configurations, and

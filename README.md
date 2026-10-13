@@ -86,7 +86,7 @@ module, no tenant configured anywhere:
 git clone https://github.com/leolani/cltl-apps.git && cd cltl-apps
 cp templates/common/config/* templates/standalone/config/* config/
 
-./modules/backend/run_host_server.sh &   # host mic server; skip for text-only
+./modules/backend/run_host_server.sh &   # host mic + camera; skip for text-only
 
 docker compose --env-file config/standalone.env \
     -f modules/event-bus/docker-compose.yml \
@@ -158,7 +158,7 @@ picture and mark regions on it, and **Monitoring**, an iframe onto
 | 8002 | EMISSOR data API (`modules/emissor`) | fixed |
 | 8003 | Chat UI (`modules/chat-ui`) | `CLTL_CHATUI_PORT` |
 | 8005 | Monitoring view (`modules/monitoring`) | `CLTL_MONITORING_PORT` |
-| 8000 | Host microphone server (`leoserv`, on the host, not in Docker) | fixed |
+| 8000 | Host microphone/camera server (`leoserv`, on the host, not in Docker) | fixed |
 
 In the split layout a tenant's `backend` moves to 9001 (`CLTL_BACKEND_PORT`
 in `config/tenant.env`), because 8001 is already taken by the server

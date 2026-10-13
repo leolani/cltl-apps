@@ -51,7 +51,8 @@ container runs both facets:
   `storage_url`.
 - **hardware I/O** — microphone, camera and text-to-speech, proxied from the
   host's microphone/camera server (`leoserv`). Each facet is switched off by
-  leaving its topic empty.
+  leaving its topic empty — the camera needs its `rate` cleared too, see
+  [Recording from the camera](#recording-from-the-camera).
 
 So "a storage server" and "a tenant's audio proxy" are two configurations of
 one module, which is why there is one directory for it.
@@ -208,7 +209,7 @@ Every module in one Compose project, nothing repointed, no tenant anywhere:
 ```bash
 cp templates/common/config/* templates/standalone/config/* config/
 
-./modules/backend/run_host_server.sh &   # host mic server; skip for text-only
+./modules/backend/run_host_server.sh &   # host mic + camera; skip for text-only
 
 docker compose --env-file config/standalone.env \
     -f modules/event-bus/docker-compose.yml \
@@ -274,7 +275,7 @@ cp templates/common/config/* templates/tenant/config/* config/
 # config/custom.config: set the tenant, and the server's host if it is not
 # this machine. config/tenant.env: this tenant's ports and CLTL_PROJECT.
 
-./modules/backend/run_host_server.sh &   # host mic server; skip for text-only
+./modules/backend/run_host_server.sh &   # host mic + camera; skip for text-only
 
 docker compose --env-file config/tenant.env \
     -f modules/backend/docker-compose.yml \
@@ -467,6 +468,50 @@ There is no tenant-side key for the EMISSOR data API: nothing in
 `templates/tenant/` consumes one, so `/emissor/*` behind the proxy is for
 direct access only (a script, a notebook).
 
+## Recording from the camera
+
+The baseline records the host's camera, one image every five seconds:
+
+```ini
+[cltl.backend.image]
+topic: cltl.topic.image
+rate: 0.2
+```
+
+`rate` is images per second. The two keys gate different things, which is
+worth knowing before switching either off: `rate` decides whether the
+container builds a camera at all, `topic` whether the thread that records
+from it runs. A rate with no topic is the awkward middle — a camera is
+created and a session opened against the host server, and nothing ever reads
+from it — so switch the camera off by clearing **both**, as
+`templates/server/` does.
+
+Each image is published on `cltl.topic.image`, stored under `storage/image`,
+recorded by `modules/emissor` into the scenario, and shown in the chat UI's
+Monitoring tab. That tab is the only place in a running deployment where you
+can watch frames arrive, which is most of why both defaults changed together.
+Nothing in this platform's module set *interprets* an image — see
+[Image upload](#image-upload) for the same caveat about uploads.
+
+Like the microphone, this needs `modules/backend/run_host_server.sh` on the
+machine with the camera. Two things follow from that, both easy to get wrong:
+
+- **Recording does not start until a scenario is open.** The thread logs `No
+  active scenario, waiting to start recording images` once a second until
+  `modules/context` opens one, and the chat UI's consent question is answered.
+- **The resolution is `leoserv`'s, not `[cltl.video] resolution`.** With
+  `[cltl.backend] run_server` false — which is every layout here — the
+  container proxies the host server instead of opening a camera, so it *asks*
+  leoserv what the resolution is rather than telling it. `[cltl.video]` is
+  read only by a backend running its own server. `run_host_server.sh`
+  therefore passes `--resolution VGA` explicitly, matching `[cltl.video]`:
+  leoserv's own default is `NATIVE`, and on a modern webcam that stores
+  full-resolution frames every five seconds for no gain downstream.
+
+At 0.2 images per second a conversation of a few minutes is a few dozen VGA
+frames, which is the trade this default is picking. Raise `rate` for a denser
+record, or set both keys empty for none.
+
 ## The chat UI's two tabs
 
 The column beside the conversation is a tab strip, and both tabs are on in
@@ -575,15 +620,23 @@ conversation records normally.
 
 ## Text-only (no host microphone server)
 
-Set the mic topic empty in `config/custom.config`:
+Switch off both facets that need the host server — the microphone and, since
+it is on by default now, the camera:
 
 ```ini
 [cltl.backend.mic]
 topic:
+
+[cltl.backend.image]
+topic:
+rate: 0
 ```
 
 `run_host_server.sh` is then unnecessary and the chat UI becomes the sole
-input channel.
+input channel. Clearing only the mic topic is not enough: the camera would
+keep trying to reach a host server that is not running, logging a capture
+failure every second. See [Recording from the
+camera](#recording-from-the-camera).
 
 ## Troubleshooting
 
@@ -621,6 +674,15 @@ template has been copied into it yet.
 **`depends_on` names an undefined service** — a module was brought up without
 the one it depends on in the same `-f` invocation. See
 [What depends on what](#what-depends-on-what).
+
+**`Failed to capture to image` once a second** — the camera is on (it is by
+default) and `run_host_server.sh` is not running on this machine, or not
+reachable at `[cltl.backend] server_image_url`. Start it, or switch the
+camera off as [Text-only](#text-only-no-host-microphone-server) shows.
+
+**`No active scenario, waiting to start recording images`** — not an error.
+The camera waits for `modules/context` to open a scenario and for the chat
+UI's consent question to be answered.
 
 **Nothing in `storage/emissor/` after a conversation** — usually the
 scenario-start race, not a broken pipeline: `modules/emissor`'s log will show
