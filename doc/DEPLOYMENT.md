@@ -561,7 +561,7 @@ To drop the tab, set `image_upload: False` in `config/custom.config`.
 `modules/monitoring` is a per-scenario view (image, transcript, detected
 faces) that the chat UI's **Monitoring** tab embeds in an iframe. The tab is
 on in the shipped config — `[cltl.chat-ui] monitoring_url` is
-`http://localhost:8005` — so the switch to remember is the other one:
+`http://localhost:8005/monitoring` — so the switch to remember is the other one:
 include `-f modules/monitoring/docker-compose.yml`, or the tab is there with
 nothing behind it. Both layouts' commands above already include it.
 
@@ -569,12 +569,18 @@ To drop the tab instead, set `monitoring_url` empty in
 `config/custom.config`; it is then simply absent, which is safer than a tab
 whose iframe cannot load.
 
-The URL must be a bare origin (`http://localhost:<CLTL_MONITORING_PORT>`, no
-path) reachable from the **browser** — not a Compose service name and not the
-server's host — because the chat UI frontend appends the page path itself.
-Keep it in step with `CLTL_MONITORING_PORT` by hand; config files and env
-files do not expand each other, so a second tenant that moves that port must
-override `monitoring_url` as well.
+The URL needs the **origin and the `/monitoring` path**:
+`http://localhost:<CLTL_MONITORING_PORT>/monitoring`. The chat UI frontend
+appends only `/static/monitoring.html?scenario=<id>` to it, and
+`cltl-monitoring` mounts its app under `/monitoring` on its own dispatcher —
+exactly as the chat UI itself lives under `/chatui` — so dropping the prefix
+gives the iframe a 404 while every other part of the deployment looks fine.
+
+It must be reachable from the **browser**, so not a Compose service name and,
+on a tenant, not the server's host. Keep it in step with
+`CLTL_MONITORING_PORT` by hand; config files and env files do not expand each
+other, so a second tenant that moves that port must override
+`monitoring_url` as well.
 
 `[cltl.monitoring] active_interval` is `0` here, meaning every scenario is
 recorded whether or not anything is polling for it. The component's own
@@ -689,11 +695,16 @@ scenario-start race, not a broken pipeline: `modules/emissor`'s log will show
 `Skipping signal for stopped or unknown Scenario`. See
 [The scenario-start race](#the-scenario-start-race).
 
-**Monitoring tab missing or blank** — it is on by default, so blank almost
-always means `modules/monitoring` was left out of the `-f` list, or is
-unhealthy. Otherwise confirm `[cltl.chat-ui] monitoring_url` is a bare,
-browser-reachable origin matching this checkout's `CLTL_MONITORING_PORT` —
-a second tenant has to repoint it by hand.
+**Monitoring tab shows "URL not found"** — `[cltl.chat-ui] monitoring_url` is
+missing its `/monitoring` path. The frontend appends only
+`/static/monitoring.html` to that value, so the mount prefix has to be in it:
+`http://localhost:8005/monitoring`, not `http://localhost:8005`.
+
+**Monitoring tab missing or blank** — the tab is on by default, so blank
+almost always means `modules/monitoring` was left out of the `-f` list, or is
+unhealthy. Otherwise confirm `monitoring_url` is browser-reachable and
+matches this checkout's `CLTL_MONITORING_PORT` — a second tenant has to
+repoint it by hand.
 
 **Image tab missing** — `[cltl.chat-ui] image_upload` is off, or
 `external_input` is not `True`. Both are on in the shipped baseline, so this
