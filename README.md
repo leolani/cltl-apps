@@ -176,3 +176,10 @@ which connects to the bus cell by cell.
 [`doc/LEOLANI.md`](doc/LEOLANI.md) is the narrative architecture overview of
 the platform and its agent variants — read that first if you want the "why"
 before the "how".
+
+
+## References
+Feel free to use our work but cite us:
+* Baez Santamaria, S., Baier, T., Kim, T., Krause, L., Kruijt, J., & Vossen, P. (2021). EMISSOR: A platform for capturing multimodal interactions as episodic memories and interpretations with situated scenario-based ontological references. In Proceedings of the First workshop Beyond Language: Multimodal Semantic Representations in conjunction with IWCS 2022
+* T. Baier, S. Báez Santamaría, P. Vossen: A modular architecture for creating multimodal embodied agents with an episodic Knowledge Graph as an explainable and controllable long-term memory, in: Dialogue & Discourse Volume 14, ed. 3, pages 25-59
+
