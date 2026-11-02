@@ -155,6 +155,9 @@ one tagged `(via myorg.example)`.
 **An uploaded image gets one.** Submitting from the chat UI's Image panel
 publishes an image signal and *no* utterance, so `cltl-eliza` — which
 subscribes to `cltl.topic.text_in` and nothing else — never sees a picture.
+While it fetches the pixels, this module reports so in the chat UI's status
+bar (`[myorg.example] topic_status`), and a fetch that fails leaves a warning
+in the transcript.
 
 ## Make it yours
 

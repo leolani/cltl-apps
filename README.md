@@ -145,10 +145,11 @@ server, and for putting `modules/reverse-proxy` in front of a public one.
 
 Chat UI: <http://localhost:8003/chatui/static/chat.html> — answer the agent's
 opening consent question before anything else, or nothing responds. Beside
-the conversation are two tabs, both on by default: **Image**, to upload a
+the conversation are two tabs on by default: **Image**, to upload a
 picture and mark regions on it, and **Monitoring**, an iframe onto
-`modules/monitoring`. See
-[doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#the-chat-uis-two-tabs).
+`modules/monitoring`. A third, **Display**, is off by default. Below the
+conversation a status bar shows what modules report they are doing. See
+[doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#the-chat-uis-tabs-and-status-bar).
 
 | Port | Service | Set by |
 |---|---|---|

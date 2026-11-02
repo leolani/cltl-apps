@@ -34,7 +34,7 @@ same three config files, and sets the same `extra_hosts`.
 | `vad-asr` | `eliza-vad`, `eliza-asr` | Voice activity detection feeding speech recognition |
 | `emissor` | `eliza-emissor` | Records interaction data to `storage/emissor` as it arrives, serves it over REST |
 | `context` | `context` | Opens and closes the conversation scenario; carries the BDI model and init intention |
-| `chat-ui` | `chatui` | The web chat UI, with the Image and Monitoring tabs beside the conversation |
+| `chat-ui` | `chatui` | The web chat UI, with the Image, Monitoring and (opt-in) Display tabs beside the conversation and a status bar below it |
 | `monitoring` | `monitoring` | Optional per-scenario view, embedded as the chat UI's Monitoring tab |
 | `reverse-proxy` | `caddy` (+ a `rabbitmq` override) | Optional TLS and Basic Auth in front of a public server |
 
@@ -372,7 +372,7 @@ The one port that is not purely a Compose matter is `CLTL_MONITORING_PORT`:
 `[cltl.chat-ui] monitoring_url` is the URL the **browser** uses to reach it,
 so moving the port and not repointing the URL leaves this tenant's Monitoring
 tab iframed onto tenant-a's view. See
-[The chat UI's two tabs](#the-chat-uis-two-tabs).
+[The chat UI's tabs and status bar](#the-chat-uis-tabs-and-status-bar).
 
 ## A remote server
 
@@ -512,13 +512,14 @@ At 0.2 images per second a conversation of a few minutes is a few dozen VGA
 frames, which is the trade this default is picking. Raise `rate` for a denser
 record, or set both keys empty for none.
 
-## The chat UI's two tabs
+## The chat UI's tabs and status bar
 
-The column beside the conversation is a tab strip, and both tabs are on in
-the shipped `templates/common/config/default.config`. `GET /chatui/config`
-tells the page which ones this deployment offers: a tab whose key is off is
-left out, a single remaining tab loses the strip, and neither leaves the
-column out.
+The column beside the conversation is a tab strip. The Image and Monitoring
+tabs are on in the shipped `templates/common/config/default.config`, the
+Display tab is not. `GET /chatui/config` tells the page which ones this
+deployment offers: a tab whose key is off is left out, a single remaining tab
+loses the strip, and none leaves the column out. Below the conversation is a
+status bar, also on.
 
 ### Image upload
 
@@ -585,10 +586,58 @@ other, so a second tenant that moves that port must override
 `[cltl.monitoring] active_interval` is `0` here, meaning every scenario is
 recorded whether or not anything is polling for it. The component's own
 default of 15 seconds suits a camera-fed deployment; it does not suit this
-one, because the two tabs share a strip. While a person annotates an image
+one, because the tabs share a strip. While a person annotates an image
 the Monitoring tab is hidden, nothing is polling, and the image they submit
 would be discarded on arrival with no replay — so the tab would be blank
 when they switched to it.
+
+### Status bar
+
+Any module can tell the person what it is doing by publishing a
+`StatusEvent` (`cltl.combot.event.status`) on `[cltl.chat-ui.events]
+topic_status`, which is `cltl.topic.status` in the baseline. The bar shows
+the most severe open status, newest first among equals; clicking it opens a
+timeline of the last `[cltl.chat-ui] status_history` events.
+
+A status with a `key` stays until a later one with the same key replaces it,
+or ends it with `resolved=True`; one without a key should carry a `ttl` in
+seconds. A `persistent` status is not shown in the bar at all, but as a line
+in the transcript, where it stays.
+
+The chat UI only keeps statuses of the running scenario, and forgets them
+when the scenario stops. A publisher therefore has to build its event with
+`Event.for_payload(status, source=<the event it reacts to>)`, which is what
+copies `scenario_id` (and the tenant) onto it; a status without one is
+dropped. `custom-module/` publishes statuses while it fetches an uploaded
+image, as an example.
+
+Nothing in the platform's own module set publishes statuses yet, so until
+something does the bar reads "No status". Set `topic_status` empty in
+`config/custom.config` to leave it out.
+
+### Display
+
+The **Display** tab shows a page a module asks to have shown: a
+`DisplayEvent(url, name)` (`cltl.combot.event.display`) on
+`[cltl.chat-ui.events] topic_display`. The newest page is on view and named
+on the tab; the earlier ones of the scenario stay in a list, up to
+`[cltl.chat-ui] display_history`.
+
+It is off in the baseline, because nothing in it publishes pages. To turn it
+on, add to `config/custom.config`:
+
+```ini
+[cltl.chat-ui.events]
+topic_display: cltl.topic.display
+```
+
+The URL is loaded by the **browser**, in an iframe, so it has to be one the
+browser can reach. Only `http(s)` URLs on `localhost` (or `127.0.0.1`,
+`::1`) are shown, plus hosts listed, comma-separated, in `[cltl.chat-ui]
+display_allowed_hosts`; anything else is dropped with a warning in the chat
+UI's log. A page served by a remote server needs that server's host there.
+As with statuses, only events of the running scenario count, so publish with
+`source=`.
 
 ## The scenario-start race
 
@@ -705,6 +754,20 @@ almost always means `modules/monitoring` was left out of the `-f` list, or is
 unhealthy. Otherwise confirm `monitoring_url` is browser-reachable and
 matches this checkout's `CLTL_MONITORING_PORT` — a second tenant has to
 repoint it by hand.
+
+**Status bar never changes** — nothing is publishing on
+`[cltl.chat-ui.events] topic_status`, which is the case for the platform's
+own modules. If something is, check that it publishes on the same topic, and
+with `source=` an event of the running scenario: a status without that
+scenario's id is dropped without a word.
+
+**Display tab missing** — `[cltl.chat-ui.events] topic_display` is empty,
+which is the baseline. See [Display](#display).
+
+**Display tab shows nothing although a page was published** — the URL is not
+`http(s)` on `localhost` or a host in `[cltl.chat-ui] display_allowed_hosts`,
+or the event carried another scenario's id. The chat UI logs `Dropped display
+of <url>` for the first.
 
 **Image tab missing** — `[cltl.chat-ui] image_upload` is off, or
 `external_input` is not `True`. Both are on in the shipped baseline, so this

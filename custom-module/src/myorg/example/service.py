@@ -3,6 +3,7 @@ from typing import Callable, Optional
 
 import numpy as np
 from cltl.combot.event.emissor import TextSignalEvent
+from cltl.combot.event.status import StatusEvent
 from cltl.combot.infra.config import ConfigurationManager
 from cltl.combot.infra.event import Event, EventBus
 from cltl.combot.infra.event.util import extract_scenario_id
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 # vanish. cltl-chat-ui uses 256 and cltl-monitoring its own constant for exactly
 # this reason. Eight is ample for a conversation driven by one person.
 BUFFER_SIZE = 8
+
+# What this module calls itself in the chat UI's status bar, and the key that
+# lets a later status replace or end the one before it.
+STATUS_SOURCE = "myorg.example"
+IMAGE_STATUS_KEY = "myorg.example.image"
 
 
 class ExampleService:
@@ -63,6 +69,9 @@ class ExampleService:
                            if "image_storage_url" in config else None)
             image_loader = cls._storage_loader(storage_url)
 
+        # Same switch as topic_image: absent or empty publishes no status.
+        status_topic = config.get("topic_status") if "topic_status" in config else None
+
         # Tenanting is the BUS's job, not this service's — KombuEventBus binds
         # `<topic>.<tenant>` and RabbitMQ does the filtering
         # (cltl.combot.infra.event.kombu). This service never compares
@@ -81,7 +90,7 @@ class ExampleService:
         return cls(input_topic, output_topic, example, event_bus, resource_manager,
                    shared_bus=(implementation != "internal"), tenant=tenant,
                    image_topic=image_topic, image_example=image_example,
-                   image_loader=image_loader)
+                   image_loader=image_loader, status_topic=status_topic)
 
     @staticmethod
     def _storage_loader(storage_url: Optional[str]) -> Callable[[str], np.ndarray]:
@@ -157,7 +166,8 @@ class ExampleService:
                  event_bus: EventBus, resource_manager: ResourceManager,
                  shared_bus: bool = False, tenant: str = None,
                  image_topic: str = None, image_example: ImageExample = None,
-                 image_loader: Callable[[str], np.ndarray] = None):
+                 image_loader: Callable[[str], np.ndarray] = None,
+                 status_topic: str = None):
         if not input_topic:
             raise ValueError("[myorg.example] topic_input is empty. Subscribing to an "
                              "empty topic string binds a queue under kombu that can "
@@ -183,6 +193,8 @@ class ExampleService:
         self._image_topic = image_topic
         self._image_example = image_example
         self._image_loader = image_loader
+
+        self._status_topic = status_topic or None
 
         # Only used to decide whether the empty-tenant warning in start() is
         # relevant at all — SynchronousEventBus has no tenants, so warning
@@ -226,7 +238,8 @@ class ExampleService:
         # integration/tests/slices/test_intention_routing.py::TestTenantScopedGating
         # (xfail(strict=True)). See docs/tenancy.md.
         self._topic_worker = TopicWorker(self.topics, self._event_bus,
-                                         provides=[self._output_topic],
+                                         provides=[topic for topic in (self._output_topic,
+                                                                       self._status_topic) if topic],
                                          buffer_size=BUFFER_SIZE,
                                          resource_manager=self._resource_manager,
                                          processor=self._process,
@@ -290,9 +303,16 @@ class ExampleService:
             return None
 
         file_url = signal.files[0]
+        self._publish_status(event, "Fetching image…", key=IMAGE_STATUS_KEY)
         try:
             image = self._image_loader(file_url)
         except Exception as e:
+            # Ends the status in the bar, then leaves a line in the transcript:
+            # a failure should still be there when the person looks back.
+            self._publish_status(event, "Could not fetch image", key=IMAGE_STATUS_KEY,
+                                 resolved=True)
+            self._publish_status(event, f"Could not load image {signal.id}", level="warning",
+                                 persistent=True)
             # Deliberately not re-raised. TopicWorker would log and swallow it
             # anyway, and a reference that resolves to nothing is a thing that
             # happens: the publisher's upload of the pixels is itself
@@ -307,6 +327,8 @@ class ExampleService:
                 "running, or [myorg.example] image_storage_url points somewhere "
                 "else. See docs/gotchas.md.", signal.id, file_url, e)
             return None
+
+        self._publish_status(event, "Fetched image", key=IMAGE_STATUS_KEY, resolved=True)
 
         # The declared size is already on the bus: signal.ruler is a MultiIndex
         # whose bounds are (0, 0, width, height). Comparing it with what came
@@ -330,6 +352,19 @@ class ExampleService:
                 "fetched from storage are %sx%s. Answering with the pixels, which "
                 "are the thing that was actually retrieved.",
                 signal.id, tuple(bounds), declared[0], declared[1], actual[0], actual[1])
+
+    def _publish_status(self, source: Event, message: str, **kwargs) -> None:
+        """Tell the person what this module is doing, in the chat UI's status bar.
+
+        source=event for the same reason as the reply: cltl-chat-ui drops a
+        status whose scenario_id is not the running scenario's, and
+        Event.with_source is what copies it (and the tenant) over.
+        """
+        if not self._status_topic:
+            return
+
+        status = StatusEvent(message, STATUS_SOURCE, **kwargs)
+        self._event_bus.publish(self._status_topic, Event.for_payload(status, source=source))
 
     def _create_payload(self, response, scenario_id):
         signal = TextSignal.for_scenario(scenario_id, timestamp_now(), timestamp_now(), None, response)

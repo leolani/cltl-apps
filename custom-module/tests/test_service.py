@@ -10,13 +10,14 @@ from emissor.representation.scenario import TextSignal
 
 from myorg.example.echo import EchoExample
 from myorg.example.imagesize import ImageSizeExample
-from myorg.example.service import ExampleService
+from myorg.example.service import IMAGE_STATUS_KEY, STATUS_SOURCE, ExampleService
 from tests.support import fake_image_loader, image_signal, pixels
 
 INPUT_TOPIC = "inputTopic"
 OUTPUT_TOPIC = "outputTopic"
 IMAGE_TOPIC = "imageTopic"
 IMAGE_URL = "cltl-storage:image/image-1"
+STATUS_TOPIC = "statusTopic"
 
 
 def _utterance(text: str, scenario_id: str = "scenario-1") -> TextSignalEvent:
@@ -276,6 +277,94 @@ class ExampleImageServiceTest(unittest.TestCase):
             ExampleService(INPUT_TOPIC, OUTPUT_TOPIC, EchoExample(), self.event_bus,
                            resource_manager=None, image_topic=IMAGE_TOPIC,
                            image_example=ImageSizeExample())
+
+
+
+class ExampleStatusTest(unittest.TestCase):
+    """What the module tells the chat UI's status bar while it handles an image."""
+
+    def setUp(self):
+        self.event_bus = SynchronousEventBus()
+        self.replies = Queue()
+        self.statuses = Queue()
+        self.event_bus.subscribe(OUTPUT_TOPIC, self.replies.put)
+        self.event_bus.subscribe(STATUS_TOPIC, self.statuses.put)
+        self.service = None
+
+    def tearDown(self):
+        if self.service:
+            self.service.stop()
+
+    def _start(self, images, status_topic=STATUS_TOPIC):
+        self.service = ExampleService(INPUT_TOPIC, OUTPUT_TOPIC, EchoExample(),
+                                      self.event_bus, resource_manager=None,
+                                      image_topic=IMAGE_TOPIC, image_example=ImageSizeExample(),
+                                      image_loader=fake_image_loader(images),
+                                      status_topic=status_topic)
+        self.service.start()
+
+    def _publish_image(self, scenario_id="scenario-1", tenant=None):
+        signal = image_signal(scenario_id, IMAGE_URL, 64, 48)
+        event = Event.for_scenario_payload(scenario_id, ImageSignalEvent.create(signal))
+        if tenant:
+            event = Event.with_tenant(event, tenant)
+        self.event_bus.publish(IMAGE_TOPIC, event)
+
+    def _statuses(self, count):
+        statuses = [self.statuses.get(timeout=1) for _ in range(count)]
+        self.assertRaises(Empty, lambda: self.statuses.get(timeout=0.05))
+
+        return statuses
+
+    def test_a_fetched_image_opens_and_resolves_one_status(self):
+        self._start({IMAGE_URL: pixels(64, 48)})
+
+        self._publish_image()
+        self.replies.get(timeout=1)
+
+        fetching, fetched = [event.payload for event in self._statuses(2)]
+        self.assertEqual(IMAGE_STATUS_KEY, fetching.key)
+        self.assertFalse(fetching.resolved)
+        self.assertEqual(IMAGE_STATUS_KEY, fetched.key)
+        self.assertTrue(fetched.resolved)
+        self.assertEqual(STATUS_SOURCE, fetched.source)
+
+    def test_a_failed_fetch_resolves_the_status_and_leaves_a_persistent_warning(self):
+        self._start({IMAGE_URL: None})
+
+        self._publish_image()
+
+        fetching, failed, kept = [event.payload for event in self._statuses(3)]
+        self.assertTrue(failed.resolved)
+        self.assertTrue(kept.persistent)
+        self.assertEqual("warning", kept.level)
+        self.assertIsNone(kept.key)
+
+    def test_a_status_carries_the_source_tenant_and_scenario(self):
+        # cltl-chat-ui drops a status of any other scenario than the running one.
+        self._start({IMAGE_URL: pixels(64, 48)})
+
+        self._publish_image(scenario_id="scenario-xyz", tenant="tenant-a")
+
+        for status in self._statuses(2):
+            self.assertEqual("scenario-xyz", status.metadata.scenario_id)
+            self.assertEqual("tenant-a", status.metadata.tenant)
+
+    def test_text_publishes_no_status(self):
+        self._start({})
+
+        self.event_bus.publish(INPUT_TOPIC, Event.for_payload(_utterance("hello")))
+        self.replies.get(timeout=1)
+
+        self._statuses(0)
+
+    def test_no_status_topic_publishes_no_status(self):
+        self._start({IMAGE_URL: pixels(64, 48)}, status_topic=None)
+
+        self._publish_image()
+        self.replies.get(timeout=1)
+
+        self._statuses(0)
 
 
 class StorageUrlTest(unittest.TestCase):

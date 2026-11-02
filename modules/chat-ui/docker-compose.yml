@@ -1,8 +1,8 @@
 # The web chat UI: the browser-facing text input and output channel, and the
 # sole input channel in a text-only deployment.
 #
-# Beside the conversation it shows a tab strip, both tabs on in the shipped
-# config:
+# Beside the conversation it shows a tab strip, Image and Monitoring on in
+# the shipped config, Display off:
 #
 #   - Image      [cltl.chat-ui] image_upload — upload a picture, drag
 #                labelled regions over it, submit. The pixels are PUT to
@@ -11,8 +11,12 @@
 #   - Monitoring [cltl.chat-ui] monitoring_url — an iframe onto
 #                modules/monitoring, so bring that module up alongside this
 #                one, or empty the key in config/custom.config.
+#   - Display    [cltl.chat-ui.events] topic_display — pages other modules
+#                publish as DisplayEvents. Off: nothing here publishes them.
 #
 # A tab whose key is off is left out, and one remaining tab loses the strip.
+# Below the conversation, a status bar shows the StatusEvents modules publish
+# on [cltl.chat-ui.events] topic_status, on in the shipped config.
 #
 # Needs modules/backend up and healthy (see depends_on below — bring both up
 # in one invocation, or have backend already running):
