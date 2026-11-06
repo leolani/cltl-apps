@@ -142,6 +142,7 @@ A second tenant is another checkout with its own tenant id, its own
 [`doc/DEPLOYMENT.md`](doc/DEPLOYMENT.md) for that, for a genuinely remote
 server, and for putting `modules/reverse-proxy` in front of a public one.
 
+
 ## The host server (leoserv)
 
 `leoserv` captures this machine's microphone and camera and plays the
@@ -195,6 +196,22 @@ docker run --rm --add-host=host.docker.internal:host-gateway curlimages/curl:8.1
 - **Only the `docker run` check fails:** the firewall is blocking the container's route to leoserv.
 - **More:** see [Troubleshooting](doc/DEPLOYMENT.md#troubleshooting).
 
+### A public server on a cloud VM
+
+[`scripts/install-server.sh`](scripts/install-server.sh) does all of the
+server half on a fresh Ubuntu 22.04/24.04 machine: Docker, `config/`, TLS
+for HTTP (caddy, Let's Encrypt) and for the event bus (AMQPS on 5671),
+generated credentials, one RabbitMQ user per tenant, and a systemd unit so it
+survives reboots:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-server.sh \
+    | sudo bash -s -- --hostname combot.example.org --email you@example.org --tenants tenants.txt
+```
+
+See [doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#installing-a-server-on-a-cloud-vm).
+
+
 ## Ports
 
 Chat UI: <http://localhost:8003/chatui/static/chat.html> — answer the agent's
@@ -207,7 +224,9 @@ conversation a status bar shows what modules report they are doing. See
 
 | Port | Service | Set by |
 |---|---|---|
-| 5672 | RabbitMQ AMQP (`modules/event-bus`) | fixed |
+| 5672 | RabbitMQ AMQP (`modules/event-bus`) | fixed; bind address `CLTL_AMQP_BIND` |
+| 5671 | RabbitMQ AMQPS, for tenants of a public server (`modules/reverse-proxy`) | fixed |
+| 80 / 443 | caddy: ACME challenge / HTTPS (`modules/reverse-proxy`) | fixed |
 | 15672 | RabbitMQ management UI (`eliza` / `eliza123`) | fixed |
 | 8001 | Storage API (`modules/backend`) | `CLTL_BACKEND_PORT` |
 | 8002 | EMISSOR data API (`modules/emissor`) | fixed |

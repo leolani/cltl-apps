@@ -368,8 +368,13 @@ The asymmetry is the thing to remember:
 So a tenant is all-or-nothing per deployment. Set it everywhere (a tenant
 deployment) or nowhere (standalone, or the server half); a deployment where
 only some modules have one drops messages with nothing in the logs to say so.
-Separation is cooperative — a routing key — not enforced by network
-isolation.
+Separation is cooperative — a routing key — unless the server gives each
+tenant its own RabbitMQ user. `scripts/install-server.sh` does exactly that
+when given a tenant list: a user named after each tenant id, with topic
+permissions that let it publish, and bind its queues, only on routing keys
+ending in `.<tenant>`. Then a tenant cannot read or write another tenant's
+traffic even if it tries. See
+[Installing a server on a cloud VM](#installing-a-server-on-a-cloud-vm).
 
 A tenant id is one lowercase routing-key word (`^[a-z0-9][a-z0-9_-]*$`), set
 as `[cltl.event.kombu] tenant` in that checkout's `config/custom.config`.
@@ -430,7 +435,10 @@ storage_url: http://<server-host>:8001/storage
 
 For a server on another machine, replace `<server-host>` with its reachable
 hostname or IP and make sure ports 5672 and 8001 are reachable from the
-tenant.
+tenant. That is plain AMQP and HTTP with the shipped default credentials, so
+only do it on a network you trust; a server reachable from the internet
+belongs behind `modules/reverse-proxy`, which changes all three URLs — see
+the next two sections.
 
 Do **not** change `server_audio_url`, `server_image_url` or
 `[cltl.backend.text_output] remote_url` to match. Those mean this tenant's
@@ -439,21 +447,38 @@ however far away the server is.
 
 ## Fronting a public server with TLS and auth
 
-The server command above is bare HTTP/AMQP with no authentication — correct
-for a server co-located with its tenants, wrong once the host is reachable
-from the public internet. `modules/reverse-proxy` adds `caddy`, terminating
-TLS on `:443` and Basic-Auth-gating the storage API, the EMISSOR data API and
-RabbitMQ's management UI, dispatched by URL path (`/storage/*`, `/emissor/*`,
-`/rabbitmq/*` — see `modules/reverse-proxy/Caddyfile`). It is optional and
-additive: leave it out and the deployment behaves exactly as before.
+The server command above is bare HTTP/AMQP with the default credentials —
+correct for a server co-located with its tenants, wrong once the host is
+reachable from the public internet. `modules/reverse-proxy` fixes both
+protocols:
+
+- **HTTP** goes through `caddy` on `:443`: TLS with a Let's Encrypt
+  certificate for `CLTL_HOSTNAME`, dispatched by URL path to the storage API
+  (`/storage/*`), the EMISSOR data API (`/emissor/*`) and RabbitMQ's
+  management UI (`/rabbitmq/*`) — see `modules/reverse-proxy/Caddyfile`. One
+  shared Basic Auth credential guards the first two. The management UI is
+  guarded by RabbitMQ's own login instead: it authenticates every request with
+  the same `Authorization` header, so a caddy credential there would lock
+  everyone out.
+- **AMQP** cannot go through an HTTP proxy, so RabbitMQ terminates TLS itself:
+  the module adds an AMQPS listener on `:5671` that serves caddy's
+  certificate (`modules/reverse-proxy/rabbitmq.conf`).
+
+Then the module's own ports — 5672, 8001, 8002, 15672 — are bound to
+`127.0.0.1`, leaving 80, 443 and 5671 as the only ways in. Port 80 serves the
+ACME challenge and nothing else; it does not redirect, so that a mistyped
+`http://` URL cannot leak a credential.
+
+**Use [`scripts/install-server.sh`](#installing-a-server-on-a-cloud-vm)**
+rather than doing this by hand. Beyond the bring-up command below, a public
+server needs several things set in step: a generated admin password in both
+`config/server.env` and `config/custom.config`, a certificate in
+`storage/rabbitmq-tls/` before RabbitMQ will start at all, that certificate
+re-copied whenever caddy renews it, and non-admin users for the tenants.
+
+For the record, the bring-up is the server command plus one file:
 
 ```bash
-docker run --rm caddy:2.8-alpine caddy hash-password --plaintext '<password>'
-echo '<user> <hash>' > config/basic-auth.auth   # one shared credential, every route
-
-# set CLTL_HOSTNAME and CLTL_ACME_EMAIL in config/server.env first — caddy
-# refuses to start without them
-
 docker compose --env-file config/server.env \
     -f modules/event-bus/docker-compose.yml \
     -f modules/backend/docker-compose.yml \
@@ -463,47 +488,148 @@ docker compose --env-file config/server.env \
     -f modules/reverse-proxy/docker-compose.yml up -d --wait --pull always
 ```
 
-`modules/reverse-proxy` must stay in the same invocation as the rest: its
-`depends_on: backend: condition: service_healthy` only resolves for a service
-defined in the same merged project. A DNS name for `CLTL_HOSTNAME` must
-already resolve to this host, with port 80 reachable, before the first `up` —
-Caddy's ACME HTTP-01 challenge needs it. Watch
-`docker compose logs -f caddy`.
+`scripts/server-compose.sh` is exactly that command, with any arguments
+appended. `modules/reverse-proxy` must stay in the same invocation as the
+rest: its `depends_on: backend: condition: service_healthy` only resolves for
+a service defined in the same merged project, and it overrides the
+`rabbitmq` service rather than defining one. A DNS name for `CLTL_HOSTNAME`
+must already resolve to this host, with port 80 reachable, before the first
+`up` — caddy's ACME HTTP-01 challenge needs it.
 
-The result: `https://<hostname>/storage/`, `https://<hostname>/emissor/` and
-`https://<hostname>/rabbitmq/` replace `http://<host>:8001/...`, `:8002/...`
-and `:15672` for anything reaching this deployment from outside. Once that
-works, also set `CLTL_STORAGE_BIND`, `CLTL_EMISSOR_BIND` and
-`CLTL_RABBITMQ_MGMT_BIND` to `127.0.0.1` in `config/server.env` and re-run
-`up`, so the raw ports stop being reachable from outside the host at all.
+### A tenant of a public server
 
-AMQP (5672) is untouched by all of this: its auth is in-protocol SASL, so no
-HTTP reverse proxy can add TLS or auth to it, and stock caddy cannot proxy
-raw TCP. It keeps its plain binding regardless.
-
-A tenant pointed at a proxied server needs path-prefixed HTTPS URLs, which
-`<server-host>` and a port cannot express — override both storage keys in
-the tenant's `config/custom.config`:
+A tenant then reaches everything over TLS, by name:
 
 ```ini
+[cltl.event.kombu]
+tenant: tenant-a
+server: amqps://tenant-a:<password>@<hostname>:5671/
+
 [cltl.backend]
-storage_url: https://<hostname>/storage/
+storage_url: https://<user>:<password>@<hostname>/storage/
 
 [cltl.backend.remote_storage]
-storage_url: https://<hostname>/storage
+storage_url: https://<user>:<password>@<hostname>/storage
 ```
 
-Embed the shared credential (`https://<user>:<password>@<hostname>/storage/`)
-if the tenant should authenticate without being prompted. One caveat either
-way: `CltlAudioAdapter.send`
-(`cltl-backend/src/cltl/backend/source/client_source.py`) rewrites this URL
-before handing it to `requests` and drops any userinfo in the process, so a
-tenant that uploads its own audio across the proxy gets a silent `401`
-instead of an authenticated request — a known upstream gap.
+- The `amqps://` URL is that tenant's line in the server's
+  `config/tenants.urls`. With per-tenant users, `tenant` must be the same id
+  as the user: the broker refuses any other routing key.
+- The storage credential is the server's Basic Auth user and password, from
+  its `config/credentials`.
+- Use the hostname, never an IP: `KombuEventBus` checks the broker's
+  certificate against the host in the URL (it needs a `cltl-combot` with
+  that check, which is what passes `server_hostname`; an older one still
+  verifies the certificate chain, but not the name).
+- For a broker whose certificate is not from a public CA, set
+  `[cltl.event.kombu] ssl_ca_certs` to a CA file inside the container.
 
 There is no tenant-side key for the EMISSOR data API: nothing in
 `templates/tenant/` consumes one, so `/emissor/*` behind the proxy is for
 direct access only (a script, a notebook).
+
+## Installing a server on a cloud VM
+
+`scripts/install-server.sh` turns a fresh Ubuntu 22.04 or 24.04 machine into
+a public server — the server role behind `modules/reverse-proxy`, as
+described above — and keeps it running across reboots. Before running it:
+
+1. Give the machine a DNS name: an A record pointing at its public IP. Use
+   a static (elastic, reserved) IP, or the name breaks when the IP changes.
+2. Open inbound TCP **80, 443 and 5671** in the cloud provider's security
+   group (and 22 for yourself). Nothing else needs to be reachable; the
+   script does not configure a host firewall.
+3. Optionally, write a tenant list: one tenant id per line, `#` comments
+   allowed.
+
+Then, on the machine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-server.sh \
+    | sudo bash -s -- --hostname combot.example.org --email you@example.org \
+                      --tenants tenants.txt
+```
+
+It clones this repository into `/opt/cltl-apps` (`--dir`, `--repo`, `--ref`
+to change that) and runs itself from there; from an existing checkout,
+`sudo scripts/install-server.sh ...` does the same in place. `--help` lists
+every option. A first run takes a while: several GB of images, then the ASR
+module downloads its Whisper model.
+
+What it does:
+
+- installs Docker Engine and the Compose plugin from Docker's apt repository,
+  if `docker compose` is not already there;
+- populates `config/` from `templates/common` and `templates/server`, and
+  sets `CLTL_HOSTNAME`, `CLTL_ACME_EMAIL`, `VERSION` and the `127.0.0.1`
+  binds in `config/server.env`;
+- generates the event bus's admin password (into `config/server.env` and
+  `[cltl.event.kombu] server` in `config/custom.config`) and the Basic Auth
+  password (into `config/basic-auth.auth`, as a bcrypt hash);
+- checks that the hostname resolves to this machine;
+- creates the RabbitMQ users for the tenants (below);
+- installs and starts `cltl-server.service` (the stack, via
+  `scripts/server-compose.sh`) and `cltl-rabbitmq-cert.timer` (a daily
+  `scripts/sync-rabbitmq-cert.sh`, which hands caddy's renewed certificate to
+  RabbitMQ without restarting it);
+- checks the result from this machine: the module ports are loopback-only,
+  `/storage/` needs the credential, and 5671 presents a valid certificate for
+  the hostname. Then it prints a summary with every URL and credential.
+
+| File | Holds |
+|---|---|
+| `config/credentials` | every generated secret (root-only). Not `credentials.config`, which the platform would load into every module |
+| `config/tenants.urls` | one `<id> amqps://<id>:<password>@<hostname>:5671/` line per tenant user (root-only) |
+| `config/server.env`, `config/custom.config` | as in any server checkout, plus the values above |
+| `storage/rabbitmq-tls/` | RabbitMQ's copy of caddy's certificate |
+
+### Tenant users
+
+| Installer run | RabbitMQ users |
+|---|---|
+| `--tenants FILE` | one per id, named after it, confined by topic permissions to routing keys ending in `.<id>` |
+| no list, no tenants yet | one shared user, `tenant`: any tenant id works, and separation stays cooperative |
+
+All tenant users can only touch the `cltl.combot` exchange and their own
+broker-named queues, and none has access to the management UI. The admin
+user `eliza` is used only by the server's own modules, over the Docker
+network.
+
+Tenants are added, never removed: a re-run with a longer list creates the
+new users and keeps everyone else's password. A user that exists on the
+broker but is in neither the list nor `config/tenants.urls` is reported, with
+the `rabbitmqctl delete_user` command to remove it. To add one tenant
+without the installer:
+
+```bash
+sudo scripts/add-tenant.sh tenant-c     # prints its amqps:// URL
+```
+
+### Running it
+
+```bash
+sudo scripts/server-compose.sh ps                 # or logs -f caddy, restart eliza-asr, ...
+sudo systemctl status cltl-server                 # the stack, started at boot
+sudo scripts/install-server.sh                    # upgrade: pull checkout + images, restart
+```
+
+A re-run needs no flags: every value given once is kept in `config/`, and
+secrets are generated once and never rotated. Pass `--version <tag>` to pin
+the images.
+
+Checks after the first install, from your own machine:
+
+```bash
+curl -u <user>:<password> https://<hostname>/storage/      # anything but 401
+openssl s_client -connect <hostname>:5671 -servername <hostname> -verify_return_error < /dev/null
+```
+
+The last line should end in `Verify return code: 0 (ok)`. Then bring up one
+tenant against it, as [above](#a-tenant-of-a-public-server), and confirm the
+agent answers in that tenant's chat UI.
+
+`scripts/test/run.sh` runs the installer end to end in a throwaway systemd
+container, with Pebble standing in for Let's Encrypt.
 
 ## Recording from the camera
 

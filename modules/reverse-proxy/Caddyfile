@@ -1,9 +1,9 @@
 # The public HTTP surface of a server deployment, routed by path to the three
-# HTTP services this platform exposes. AMQP is deliberately absent — see the
-# comment at the top of ./docker-compose.yml for why no reverse proxy can
-# help there.
+# HTTP services this platform exposes. AMQP is absent: RabbitMQ terminates
+# TLS for it itself, on 5671, with this site's certificate — see the comment
+# at the top of ./docker-compose.yml.
 #
-# One shared Basic Auth credential guards every route (see
+# One shared Basic Auth credential guards the storage and EMISSOR routes (see
 # ./docker-compose.yml for how to generate it). This matches the platform's
 # existing tenancy model: separation between tenants is cooperative (a
 # routing key), not enforced — so one deployment-wide credential, kept off
@@ -12,6 +12,7 @@
 # `basic_auth` block per user.
 {
 	email {$CLTL_ACME_EMAIL}
+	acme_ca {$CLTL_ACME_CA}
 
 	# Port 80 stays open for the ACME HTTP-01 challenge alone. What it must
 	# NOT do is redirect to 443 — see ./docker-compose.yml.
@@ -48,14 +49,18 @@
 
 	# ---------------------------------------------------------------------
 	# The RabbitMQ management UI (modules/event-bus). `management.path_prefix`
-	# in config/rabbitmq-management.conf is what makes the UI itself work
+	# in ./rabbitmq.conf is what makes the UI itself work
 	# under a path rather than at a host root; without it the page loads and
 	# every asset 404s.
+	#
+	# No basic_auth here, unlike the routes above: the management UI and API
+	# authenticate every request with the same Authorization header, carrying
+	# the RabbitMQ user's own credential. With caddy demanding the shared one
+	# in that header too, no request could ever satisfy both. RabbitMQ's
+	# login is the gate instead; tenant users carry no management tag, so
+	# only the admin user can use it.
 	# ---------------------------------------------------------------------
 	handle /rabbitmq/* {
-		basic_auth {
-			import /etc/caddy/secrets/basic_auth.auth
-		}
 		reverse_proxy rabbitmq:15672
 	}
 

@@ -12,18 +12,22 @@
 #       -f modules/emissor/docker-compose.yml \
 #       -f modules/reverse-proxy/docker-compose.yml up -d --wait --pull always
 #
-# Everything reachable from outside this host goes through caddy on 443,
-# dispatched by URL path to the service it fronts — see ./Caddyfile. AMQP
-# (5672) is NOT part of this: AMQP's auth is in-protocol SASL negotiated at
-# connect time, so no HTTP reverse proxy can add anything to it, and stock
-# caddy cannot proxy raw TCP at all. It keeps its existing plain binding;
-# TLS for the event bus itself is a separate, bigger decision for later.
+# Everything HTTP reachable from outside this host goes through caddy on 443,
+# dispatched by URL path to the service it fronts — see ./Caddyfile.
+#
+# AMQP cannot go through caddy (its auth is in-protocol SASL, and stock caddy
+# cannot proxy raw TCP), so RabbitMQ terminates TLS itself: this file adds an
+# AMQPS listener on 5671, serving caddy's own certificate for CLTL_HOSTNAME.
+# scripts/sync-rabbitmq-cert.sh copies that certificate into
+# storage/rabbitmq-tls/ (and seeds a self-signed one before caddy has any);
+# RabbitMQ will not start until that directory holds cert.pem, chain.pem and
+# key.pem. scripts/install-server.sh does all of this, and runs the sync daily.
 #
 # One service here (`rabbitmq`) is not new — it is a partial override of the
 # same service modules/event-bus/docker-compose.yml already defines. Compose
-# concatenates list fields (like `volumes`) across merged -f files for a
-# service of the same name, so this file only ever adds the one extra mount
-# below; it changes nothing when this file is left out of the invocation.
+# concatenates list fields (like `ports` and `volumes`) across merged -f files
+# for a service of the same name, so this file only ever adds to it; it
+# changes nothing when this file is left out of the invocation.
 
 name: ${CLTL_PROJECT:-cltl-platform}
 
@@ -64,16 +68,26 @@ services:
     environment:
       CLTL_HOSTNAME: ${CLTL_HOSTNAME:?set CLTL_HOSTNAME in this checkout's env file, e.g. combot.example.org}
       CLTL_ACME_EMAIL: ${CLTL_ACME_EMAIL:?set CLTL_ACME_EMAIL in this checkout's env file}
+      # The ACME directory. Let's Encrypt production unless set; point it at
+      # https://acme-staging-v02.api.letsencrypt.org/directory while
+      # experimenting, to stay clear of the production rate limits.
+      CLTL_ACME_CA: ${CLTL_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
     networks:
       - cltl-platform
 
   rabbitmq:
+    ports:
+      # AMQPS, for tenants. Plain 5672 is modules/event-bus's own binding;
+      # set CLTL_AMQP_BIND=127.0.0.1 so this is the only way in from outside.
+      - "5671:5671"
     volumes:
-      # management.path_prefix = /rabbitmq — without it the management UI's
+      # management.path_prefix = /rabbitmq (without it the management UI's
       # own page loads under a proxied path but every asset it links resolves
-      # to the host root and 404s. modules/event-bus/docker-compose.yml mounts
-      # no rabbitmq.conf of its own, so this is the only one RabbitMQ reads.
-      - ../../modules/reverse-proxy/rabbitmq-management.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      # to the host root and 404s), plus the AMQPS listener.
+      # modules/event-bus/docker-compose.yml mounts no rabbitmq.conf of its
+      # own, so this is the only one RabbitMQ reads.
+      - ../../modules/reverse-proxy/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ../../storage/rabbitmq-tls:/etc/rabbitmq/tls:ro
 
 volumes:
   caddy-data:
