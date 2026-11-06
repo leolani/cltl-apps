@@ -521,8 +521,12 @@ storage_url: https://<user>:<password>@<hostname>/storage
   certificate against the host in the URL (it needs a `cltl-combot` with
   that check, which is what passes `server_hostname`; an older one still
   verifies the certificate chain, but not the name).
-- For a broker whose certificate is not from a public CA, set
-  `[cltl.event.kombu] ssl_ca_certs` to a CA file inside the container.
+- For a broker whose certificate is not from a public CA, copy the CA into
+  the tenant checkout's `storage/` and set `[cltl.event.kombu] ssl_ca_certs:
+  ./storage/ca.pem`. Only the three config files are mounted individually,
+  but every module mounts `storage/` under its own working directory, so that
+  one relative path resolves in all of them. Left empty, as in
+  `default.config`, the system's CA store is used.
 
 There is no tenant-side key for the EMISSOR data API: nothing in
 `templates/tenant/` consumes one, so `/emissor/*` behind the proxy is for
