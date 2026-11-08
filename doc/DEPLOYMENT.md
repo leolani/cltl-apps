@@ -238,6 +238,41 @@ once per event here. It is a warning, not an error: processing continues
 normally, and a standalone deployment has no second tenant to be confused
 with.
 
+## On Windows
+
+Everything above runs on Windows with Docker Desktop (WSL2 backend) as the
+Docker runtime. Two commands differ, because they are bash:
+
+```powershell
+Copy-Item templates\common\config\*, templates\standalone\config\* config\   # or templates\tenant
+start "leoserv" modules\backend\run_host_server.cmd   # host mic + camera, in its own window
+```
+
+`docker compose ... up` itself is the same command; replace the trailing `\`
+line continuations with backticks in PowerShell, or put it on one line.
+
+`run_host_server.cmd` is the Windows counterpart of `run_host_server.sh`:
+same `venv\` next to it, same `cltl-backend[host]` install, same leoserv
+flags. Run it on Windows itself, not inside WSL, which has no camera. It
+needs, once:
+
+- **Python 3.10–3.13** from python.org, with the `py` launcher (the
+  default). PyAudio has Windows wheels, with PortAudio bundled, only up to
+  3.13; on 3.14 pip would try to compile it and fail. Set `CLTL_PYTHON` to a
+  `python.exe` to choose one explicitly.
+- **Microphone and camera access** for desktop apps: Settings → Privacy &
+  security → Microphone / Camera → *Let desktop apps access…*. Without it the
+  microphone cannot be opened or records only silence, and leoserv exits at startup because it cannot
+  open the camera (as it does on any OS with no camera).
+- **The firewall prompt** on first start, since leoserv listens on every
+  interface. Docker Desktop delivers `host.docker.internal` through its own
+  proxy, so the containers reach it whether or not you allow it; a tenant
+  whose leoserv must be reachable from another machine needs it allowed.
+- **Port 8000 free.** Hyper-V and WinNAT reserve port ranges that can include
+  it, and leoserv then fails with *An attempt was made to access a socket in
+  a way forbidden by its access permissions*. Check with
+  `netsh int ipv4 show excludedportrange protocol=tcp`.
+
 ## Server + tenant
 
 The server half is untenanted and shared; each tenant half carries one

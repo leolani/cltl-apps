@@ -3,7 +3,8 @@ set -euo pipefail
 
 VENV_DIR="$(dirname "$0")/venv"
 
-if [ ! -d "$VENV_DIR" ]; then
+# Keyed on leoserv, not the directory, so an interrupted install is retried.
+if [ ! -x "$VENV_DIR/bin/leoserv" ]; then
     echo "Creating virtual environment at $VENV_DIR ..."
     python3 -m venv "$VENV_DIR"
     "$VENV_DIR/bin/pip" install --quiet --upgrade pip

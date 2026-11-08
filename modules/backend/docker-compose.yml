@@ -5,8 +5,9 @@
 #     audio_storage/image_storage = local it holds the store itself; with
 #     `remote` it forwards to another backend's storage_url.
 #   - hardware I/O — microphone, camera and text-to-speech, proxied from the
-#     host's microphone/camera server (leoserv; see run_host_server.sh, which
-#     cannot run in Docker because a container has no microphone). Each is
+#     host's microphone/camera server (leoserv; see run_host_server.sh, or
+#     run_host_server.cmd on Windows, which cannot run in Docker because a
+#     container has no microphone). Each is
 #     switched off by leaving its topic empty in config — the camera needs
 #     [cltl.backend.image] rate cleared too, since that is what decides
 #     whether a camera object exists at all.

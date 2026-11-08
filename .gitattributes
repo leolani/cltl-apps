@@ -1,0 +1,5 @@
+# Batch files misparse labels and goto with LF-only line endings; shell
+# scripts break with CRLF, which core.autocrlf=true on Windows would add.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf

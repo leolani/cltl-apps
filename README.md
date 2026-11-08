@@ -87,6 +87,7 @@ git clone https://github.com/leolani/cltl-apps.git && cd cltl-apps
 cp templates/common/config/* templates/standalone/config/* config/
 
 ./modules/backend/run_host_server.sh &   # host mic + camera; skip for text-only
+# Windows: start "leoserv" modules\backend\run_host_server.cmd — see doc/DEPLOYMENT.md#on-windows
 
 docker compose --env-file config/standalone.env \
     -f modules/event-bus/docker-compose.yml \
