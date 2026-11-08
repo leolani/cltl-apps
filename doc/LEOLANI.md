@@ -219,7 +219,7 @@ In addition to the Docker images, this application also needs the following to r
 
 | Requirement | Minimum version | Notes |
 | Python | 3.8+ | For the host backend server (audio capture) |
-| PortAudio | — | `portaudio19-dev` on Debian/Ubuntu; `portaudio` via Homebrew on macOS ; bundled in the PyAudio wheel on Windows (Python 3.10–3.13) |
+| PortAudio | — | `portaudio19-dev` on Debian/Ubuntu; `portaudio` via Homebrew on macOS ; bundled in the PyAudio wheel on Windows (Python 3.10) |
 
 ### How to run ELIZA-talk from the command line:
 

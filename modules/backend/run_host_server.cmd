@@ -9,38 +9,40 @@ setlocal
 
 set "VENV_DIR=%~dp0venv"
 
-rem From the ref_scenarios branch, the ref custom-module\requirements.notebook.txt
-rem pins too, not PyPI: the published 1.0.dev0 (and main) lack the /sound
-rem endpoint that [cltl.backend.text_output] remote_type: sound posts speech to.
-rem A moving ref is installed once; delete venv\ to pick up newer commits.
-set "CLTL_BACKEND=cltl-backend[host] @ git+https://github.com/leolani/cltl-backend.git@ref_scenarios"
+rem All three from the ref_scenarios branch, as custom-module\requirements.notebook.txt
+rem pins them, so leoserv runs the same cltl-backend, cltl.combot and emissor as
+rem the containers rather than PyPI's: the published cltl-backend 1.0.dev0 (and
+rem main) lack the /sound endpoint that [cltl.backend.text_output] remote_type:
+rem sound posts speech to, and emissor is listed explicitly so cltl.combot's own
+rem dependency on it does not resolve to PyPI's. Moving refs are installed once;
+rem delete venv\ to pick up newer commits. Building emissor from git only works
+rem cleanly on Python 3.10, hence the interpreter check below.
+set REQUIREMENTS="emissor @ git+https://github.com/leolani/emissor.git@ref_scenarios" "cltl.combot @ git+https://github.com/leolani/cltl-combot.git@ref_scenarios" "cltl-backend[host] @ git+https://github.com/leolani/cltl-backend.git@ref_scenarios"
 
 rem Install when leoserv.exe is missing rather than when venv\ is: an install
 rem that was interrupted leaves the directory behind and is retried here.
 if exist "%VENV_DIR%\Scripts\leoserv.exe" goto run
 
-rem Python 3.10-3.13 only: PyAudio publishes Windows wheels (with PortAudio
-rem bundled) up to 3.13, and anything newer would try to compile it from
-rem source. "python3" is often the Microsoft Store stub on Windows, so use the
-rem py launcher, or CLTL_PYTHON to name an interpreter explicitly.
+rem Python 3.10, for emissor (above); PyAudio's Windows wheels, with
+rem PortAudio bundled, would allow up to 3.13. "python3" is often the
+rem Microsoft Store stub on Windows, so use the py launcher, or CLTL_PYTHON
+rem to name an interpreter explicitly.
 rem CLTL_PYTHON is re-quoted, minus any quotes it came with, for paths with spaces.
 if defined CLTL_PYTHON (
     set "PYTHON="%CLTL_PYTHON:"=%""
     goto create
 )
-for %%v in (3.10 3.11 3.12 3.13) do (
-    py -%%v -c "" >nul 2>&1 && (
-        set "PYTHON=py -%%v"
-        goto create
-    )
+py -3.10 -c "" >nul 2>&1 && (
+    set "PYTHON=py -3.10"
+    goto create
 )
-echo No Python 3.10-3.13 found through the py launcher. 1>&2
-echo Install one from https://www.python.org/downloads/windows/ (with the py launcher), 1>&2
-echo or set CLTL_PYTHON to the full path of a python.exe of one of those versions. 1>&2
+echo Python 3.10 not found through the py launcher. 1>&2
+echo Install it from https://www.python.org/downloads/windows/ (with the py launcher), 1>&2
+echo or set CLTL_PYTHON to the full path of a Python 3.10 python.exe. 1>&2
 exit /b 1
 
 :create
-rem pip clones the git ref above, so git has to be on PATH.
+rem pip clones the git refs above, so git has to be on PATH.
 where git >nul 2>&1 || (
     echo git not found on PATH; install Git for Windows: https://git-scm.com/download/win 1>&2
     exit /b 1
@@ -49,7 +51,7 @@ echo Creating virtual environment at %VENV_DIR% with %PYTHON% ...
 %PYTHON% -m venv "%VENV_DIR%" || exit /b 1
 rem "python -m pip", not pip.exe: pip.exe cannot replace itself on Windows.
 "%VENV_DIR%\Scripts\python.exe" -m pip install --quiet --upgrade pip || exit /b 1
-"%VENV_DIR%\Scripts\python.exe" -m pip install "%CLTL_BACKEND%" || exit /b 1
+"%VENV_DIR%\Scripts\python.exe" -m pip install %REQUIREMENTS% || exit /b 1
 
 :run
 rem Same flags as run_host_server.sh, which explains them; in particular
