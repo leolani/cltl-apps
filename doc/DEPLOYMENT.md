@@ -252,14 +252,15 @@ start "leoserv" modules\backend\run_host_server.cmd   # host mic + camera, in it
 line continuations with backticks in PowerShell, or put it on one line.
 
 `run_host_server.cmd` is the Windows counterpart of `run_host_server.sh`:
-same `venv\` next to it, same `cltl-backend[host]` install, same leoserv
-flags. Run it on Windows itself, not inside WSL, which has no camera. It
+same `venv\` next to it, same `cltl-backend[host]` install from the
+`ref_scenarios` branch on GitHub, same leoserv flags. Run it on Windows itself, not inside WSL, which has no camera. It
 needs, once:
 
 - **Python 3.10–3.13** from python.org, with the `py` launcher (the
   default). PyAudio has Windows wheels, with PortAudio bundled, only up to
   3.13; on 3.14 pip would try to compile it and fail. Set `CLTL_PYTHON` to a
   `python.exe` to choose one explicitly.
+- **Git for Windows** on `PATH`: pip installs `cltl-backend` by cloning it.
 - **Microphone and camera access** for desktop apps: Settings → Privacy &
   security → Microphone / Camera → *Let desktop apps access…*. Without it the
   microphone cannot be opened or records only silence, and leoserv exits at startup because it cannot

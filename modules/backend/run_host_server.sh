@@ -3,12 +3,18 @@ set -euo pipefail
 
 VENV_DIR="$(dirname "$0")/venv"
 
+# From the ref_scenarios branch, the ref custom-module/requirements.notebook.txt
+# pins too, not PyPI: the published 1.0.dev0 (and main) lack the /sound
+# endpoint that [cltl.backend.text_output] remote_type: sound posts speech to.
+# A moving ref is installed once; delete venv/ to pick up newer commits.
+CLTL_BACKEND='cltl-backend[host] @ git+https://github.com/leolani/cltl-backend.git@ref_scenarios'
+
 # Keyed on leoserv, not the directory, so an interrupted install is retried.
 if [ ! -x "$VENV_DIR/bin/leoserv" ]; then
     echo "Creating virtual environment at $VENV_DIR ..."
     python3 -m venv "$VENV_DIR"
     "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-    "$VENV_DIR/bin/pip" install 'cltl-backend[host]'
+    "$VENV_DIR/bin/pip" install "$CLTL_BACKEND"
 fi
 
 # These flags mirror the platform baseline in templates/common/config: --rate,
