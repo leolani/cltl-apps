@@ -151,7 +151,7 @@ text-only use, skip it; see
 [doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#text-only-no-host-microphone-server).
 
 **Prerequisites.** Git, on every OS: the script installs `cltl-backend`,
-`cltl.combot` and `emissor` from their `ref_scenarios` branches on GitHub.
+`cltl.combot` and `emissor` from GitHub.
 PyAudio is compiled from source everywhere except Windows, so it needs
 PortAudio and a C compiler:
 
@@ -172,7 +172,7 @@ PortAudio and a C compiler:
 ```
 
 The first run creates `modules/backend/venv` and installs into it; later runs
-start straight away. Delete `venv` to pick up newer `ref_scenarios` commits.
+start straight away. Delete `venv` to pick up library updates.
 `CLTL_PYTHON` picks the interpreter (default `python3`, or `py -3.10`…`-3.13`
 on Windows).
 
