@@ -19,8 +19,15 @@ REQUIREMENTS=(
 
 # Keyed on leoserv, not the directory, so an interrupted install is retried.
 if [ ! -x "$VENV_DIR/bin/leoserv" ]; then
-    echo "Creating virtual environment at $VENV_DIR ..."
-    python3 -m venv "$VENV_DIR"
+    # Python 3.10, for emissor (above). CLTL_PYTHON names another interpreter.
+    PYTHON="${CLTL_PYTHON:-python3.10}"
+    if ! command -v "$PYTHON" >/dev/null 2>&1; then
+        echo "$PYTHON not found. Install Python 3.10 (e.g. apt install python3.10-venv," >&2
+        echo "brew install python@3.10), or set CLTL_PYTHON to a Python 3.10 interpreter." >&2
+        exit 1
+    fi
+    echo "Creating virtual environment at $VENV_DIR with $PYTHON ..."
+    "$PYTHON" -m venv "$VENV_DIR"
     "$VENV_DIR/bin/pip" install --quiet --upgrade pip
     "$VENV_DIR/bin/pip" install "${REQUIREMENTS[@]}"
 fi
