@@ -4,14 +4,22 @@
 # TLS and auth on everything reachable from outside. See
 # doc/DEPLOYMENT.md#installing-a-server-on-a-cloud-vm.
 #
-# On a fresh machine:
+# Run it as your normal login user, not with sudo: the checkout and config/
+# belong to you, and the script calls sudo itself only for what needs root
+# (packages, Docker, systemd). On a fresh machine, with the attached volume
+# mounted at ~/data/<volume>:
 #
 #   curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-server.sh \
-#       | sudo bash -s -- --hostname combot.example.org --email you@example.org
+#       | bash -s -- --dir ~/data/<volume>/cltl-apps \
+#                    --hostname combot.example.org --email you@example.org
 #
-# or, from a checkout:
+# or, from a checkout (which is then the install directory):
 #
-#   sudo scripts/install-server.sh --hostname combot.example.org --email you@example.org
+#   scripts/install-server.sh --hostname combot.example.org --email you@example.org
+#
+# Everything large lands next to the checkout, on the same volume: storage/
+# (event bus, EMISSOR data, the ASR models) inside it, and Docker's images,
+# containers and volumes in docker/ and containerd/ beside it.
 #
 # Options:
 #   --hostname NAME    DNS name of this machine; must already resolve to it,
@@ -24,11 +32,15 @@
 #   --auth-user NAME   Basic Auth user for /storage and /emissor
 #                      (default: cltl; the password is generated)
 #   --version TAG      image tag for every ghcr.io/leolani image (default: latest)
-#   --dir PATH         where to clone when not run from a checkout
-#                      (default: /opt/cltl-apps)
+#   --dir PATH         where to clone; required when not run from a checkout.
+#                      Put it on the attached volume, e.g. ~/data/<volume>/cltl-apps
+#   --docker-root DIR  where Docker keeps its data, as DIR/docker and
+#                      DIR/containerd (default: the directory holding the
+#                      checkout). Applied only to a Docker this script installs.
 #   --repo URL         repository to clone (default: github.com/leolani/cltl-apps)
 #   --ref REF          branch or tag to clone (default: main)
 #   --no-pull          do not `git pull` an existing checkout
+#   --allow-root       run as root anyway; the checkout is then root's
 #
 # Run it again at any time to upgrade (pulls the checkout and the images,
 # then restarts) or to add tenants from an extended --tenants file. Every
@@ -37,8 +49,11 @@
 #
 # Writes: config/server.env, config/custom.config (from the templates, plus
 # the event bus's admin password), config/credentials, config/basic-auth.auth,
-# config/tenants.urls, storage/rabbitmq-tls/, and the systemd units
-# cltl-server.service and cltl-rabbitmq-cert.{service,timer}.
+# config/tenants.urls, config/install.state, storage/rabbitmq-tls/, the
+# systemd units cltl-server.service and cltl-rabbitmq-cert.{service,timer},
+# and, when it installs Docker, /etc/docker/daemon.json, containerd's root in
+# /etc/containerd/config.toml and a drop-in for each making them wait for the
+# volume.
 #
 # Testing only (scripts/test/): --acme-ca URL, --test-ca-file PEM (trust
 # for the post-install checks), --skip-dns-check.
@@ -47,12 +62,12 @@ set -euo pipefail
 DEFAULT_REPO=https://github.com/leolani/cltl-apps.git
 
 hostname_arg="" email_arg="" tenants_arg="" auth_user_arg="" version_arg=""
-dir=/opt/cltl-apps repo=$DEFAULT_REPO ref=main pull=1
+dir="" docker_root_arg="" repo=$DEFAULT_REPO ref=main pull=1 allow_root=0
 acme_ca_arg="" test_ca_file="" skip_dns_check=0
 original_args=("$@")
 start_dir=$PWD
 
-usage() { sed -n '2,46p' "${BASH_SOURCE[0]}" 2> /dev/null | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" 2> /dev/null | sed '$d; s/^# \{0,1\}//'; }
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -62,6 +77,8 @@ while [[ $# -gt 0 ]]; do
         --auth-user) auth_user_arg=${2:?}; shift ;;
         --version) version_arg=${2:?}; shift ;;
         --dir) dir=${2:?}; shift ;;
+        --docker-root) docker_root_arg=${2:?}; shift ;;
+        --allow-root) allow_root=1 ;;
         --repo) repo=${2:?}; shift ;;
         --ref) ref=${2:?}; shift ;;
         --no-pull) pull=0 ;;
@@ -74,7 +91,18 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
-[[ $EUID -eq 0 ]] || { echo "run as root: sudo $0 ..." >&2; exit 1; }
+if [[ $EUID -eq 0 ]] && ((!allow_root)); then
+    echo "run this as your normal login user, not as root: it calls sudo itself where needed" \
+         "(or pass --allow-root to install as root)" >&2
+    exit 1
+fi
+if [[ $EUID -ne 0 ]]; then
+    command -v sudo > /dev/null || { echo "sudo is required" >&2; exit 1; }
+    # Not `sudo -v`: it asks for a password unless every sudoers rule for the
+    # user is NOPASSWD, and cloud images add one to a password-only group rule.
+    sudo true || { echo "this user needs sudo rights" >&2; exit 1; }
+fi
+as_root() { if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi; }
 
 # A tenant file named on the command line is relative to where we were run,
 # not to the checkout we cd into below.
@@ -83,8 +111,9 @@ if [[ -n $tenants_arg ]]; then
     tenants_arg=$(realpath "$tenants_arg")
 fi
 [[ -z $test_ca_file ]] || test_ca_file=$(realpath "$test_ca_file")
+[[ -z $docker_root_arg ]] || docker_root_arg=$(realpath -m "$docker_root_arg")
 
-export DEBIAN_FRONTEND=noninteractive
+apt_get() { as_root env DEBIAN_FRONTEND=noninteractive apt-get "$@"; }
 
 apt_install() {
     local missing=() pkg
@@ -93,8 +122,8 @@ apt_install() {
     done
     [[ ${#missing[@]} -eq 0 ]] && return 0
     echo "==> Installing ${missing[*]}" >&2
-    apt-get update -q
-    apt-get install -y -q --no-install-recommends "${missing[@]}"
+    apt_get update -q
+    apt_get install -y -q --no-install-recommends "${missing[@]}"
 }
 
 apt_install ca-certificates curl git openssl dnsutils iproute2
@@ -111,6 +140,17 @@ fi
 if [[ -z $self_root ]]; then
     # Piped from curl, or copied out of a checkout: clone one and re-run the
     # script from it, so what runs always matches the modules it installs.
+    if [[ -z $dir ]]; then
+        echo "--dir is required when the script is not run from a checkout: put it on the" \
+             "attached volume, e.g. --dir ~/data/<volume>/cltl-apps (see --help)" >&2
+        exit 2
+    fi
+    dir=$(realpath -m "$dir")
+    if ! mkdir -p "$(dirname "$dir")" 2> /dev/null || [[ ! -w $(dirname "$dir") ]]; then
+        echo "cannot write to $(dirname "$dir"); make it yours first:" \
+             "sudo chown $(id -un): $(dirname "$dir")" >&2
+        exit 1
+    fi
     if [[ -d $dir/.git ]]; then
         echo "==> Updating $dir to $ref" >&2
         git -c safe.directory="$dir" -C "$dir" fetch -q origin "$ref"
@@ -128,6 +168,8 @@ CLTL_ROOT=$self_root
 cd "$CLTL_ROOT"
 # shellcheck source=scripts/common.sh
 source "$CLTL_ROOT/scripts/common.sh"
+require_owner
+run_user=$(id -un)
 
 if ((pull)); then
     if [[ -n $(git -c safe.directory="$CLTL_ROOT" status --porcelain --untracked-files=no) ]]; then
@@ -151,6 +193,11 @@ fi
 if [[ ${ID:-} != ubuntu || ! ${VERSION_ID:-} =~ ^(22\.04|24\.04)$ ]]; then
     warn "tested on Ubuntu 22.04 and 24.04 only; this is ${PRETTY_NAME:-unknown}"
 fi
+mount_of() { findmnt -n -o TARGET -T "$1"; }
+if [[ $(mount_of "$CLTL_ROOT") == / ]]; then
+    warn "$CLTL_ROOT is on the root disk, not on an attached volume; storage/ and the" \
+         "Docker images will fill it. Use --dir ~/data/<volume>/cltl-apps on a fresh install."
+fi
 free_gb=$(df -P --block-size=1G "$CLTL_ROOT" | awk 'NR == 2 { print $4 }')
 mem_gb=$(awk '/^MemTotal:/ { printf "%d", $2 / 1024 / 1024 }' /proc/meminfo)
 ((free_gb >= 20)) || warn "${free_gb} GB free disk; the images and the Whisper model need about 20 GB"
@@ -158,19 +205,72 @@ mem_gb=$(awk '/^MemTotal:/ { printf "%d", $2 / 1024 / 1024 }' /proc/meminfo)
 
 # --- 3. Docker ---------------------------------------------------------------------
 
-if ! docker compose version > /dev/null 2>&1; then
+# Where Docker keeps images, containers and volumes: next to the checkout, on
+# the same volume, unless that directory is on another filesystem (a checkout
+# at the volume's root), in which case it goes under the gitignored storage/.
+docker_root=${docker_root_arg:-$(kv_get "$CLTL_STATE_FILE" DOCKER_ROOT)}
+if [[ -z $docker_root ]]; then
+    docker_root=$(dirname "$CLTL_ROOT")
+    [[ $(mount_of "$docker_root") == "$(mount_of "$CLTL_ROOT")" ]] || docker_root=$CLTL_ROOT/storage
+fi
+
+write_root_file() {  # path, content on stdin
+    as_root mkdir -p "$(dirname "$1")"
+    as_root tee "$1" > /dev/null
+}
+
+move_docker_data() {
+    # Only ever on a Docker installed a moment ago, so the default roots hold
+    # nothing worth migrating.
+    log "Moving Docker's data to $docker_root/docker and $docker_root/containerd"
+    as_root systemctl stop docker.socket docker.service containerd.service
+    as_root mkdir -p "$docker_root/docker" "$docker_root/containerd"
+    if as_root test -s /etc/docker/daemon.json; then
+        warn "/etc/docker/daemon.json already exists; add \"data-root\": \"$docker_root/docker\" to it yourself"
+    else
+        printf '{\n  "data-root": "%s/docker"\n}\n' "$docker_root" | write_root_file /etc/docker/daemon.json
+    fi
+    # Docker's containerd image store (the default for a new install since
+    # Docker 29) keeps the images under containerd's root, not Docker's.
+    # A top-level key, so it goes before the file's first table.
+    local config
+    config=$(as_root cat /etc/containerd/config.toml 2> /dev/null | grep -vE '^root[[:space:]]*=' || true)
+    printf 'root = "%s/containerd"\n%s\n' "$docker_root" "$config" | write_root_file /etc/containerd/config.toml
+    local unit
+    for unit in docker containerd; do
+        printf '# Installed by %s\n[Unit]\nRequiresMountsFor=%s\n' "$CLTL_ROOT/scripts/install-server.sh" "$docker_root" \
+            | write_root_file "/etc/systemd/system/$unit.service.d/cltl-data.conf"
+    done
+    as_root systemctl daemon-reload
+    as_root systemctl start containerd.service docker.socket docker.service
+}
+
+if ! command -v docker > /dev/null || ! docker compose version > /dev/null 2>&1; then
     log "Installing Docker Engine and the Compose plugin from download.docker.com"
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
+    as_root install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | write_root_file /etc/apt/keyrings/docker.asc
+    as_root chmod a+r /etc/apt/keyrings/docker.asc
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]" \
          "https://download.docker.com/linux/ubuntu ${UBUNTU_CODENAME:-$VERSION_CODENAME} stable" \
-         > /etc/apt/sources.list.d/docker.list
-    apt-get update -q
-    apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    systemctl enable --now docker
+         | write_root_file /etc/apt/sources.list.d/docker.list
+    apt_get update -q
+    apt_get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    as_root systemctl enable -q docker.service containerd.service
+    move_docker_data
 fi
 docker compose version > /dev/null || die "docker compose does not work"
+
+if ! id -nG "$run_user" | tr ' ' '\n' | grep -qx docker; then
+    log "Adding $run_user to the docker group (effective from your next login)"
+    as_root usermod -aG docker "$run_user"
+fi
+
+current_root=$(docker_cli info -f '{{.DockerRootDir}}')
+if [[ $current_root != "$docker_root/docker" ]]; then
+    warn "Docker keeps its data in $current_root, not $docker_root/docker: it was installed" \
+         "before this script ran, so it was left alone. See" \
+         "doc/DEPLOYMENT.md#moving-dockers-data-to-the-volume to move it."
+fi
 
 # --- 4. Inputs, remembered across runs --------------------------------------------
 
@@ -184,6 +284,7 @@ fi
 chmod 600 config/server.env
 touch "$CLTL_CREDENTIALS_FILE"
 chmod 600 "$CLTL_CREDENTIALS_FILE"
+kv_set "$CLTL_STATE_FILE" DOCKER_ROOT "$docker_root"
 
 pick() {  # flag value, else stored value
     if [[ -n $1 ]]; then printf '%s' "$1"; else kv_get "$2" "$3"; fi
@@ -228,7 +329,7 @@ ini_set config/custom.config cltl.event.kombu server "amqp://$CLTL_RABBITMQ_ADMI
 
 if [[ ! -s config/basic-auth.auth || $(awk '{ print $1; exit }' config/basic-auth.auth) != "$auth_user" ]]; then
     log "Writing the Basic Auth credential for $auth_user"
-    hash=$(docker run --rm caddy:2.8-alpine caddy hash-password --plaintext "$auth_password")
+    hash=$(docker_cli run --rm caddy:2.8-alpine caddy hash-password --plaintext "$auth_password")
     (umask 077 && printf '%s %s\n' "$auth_user" "$hash" > config/basic-auth.auth)
 fi
 # caddy reads it as a non-root file inside its container; it holds a hash only.
@@ -261,7 +362,7 @@ fi
 
 # --- 7. Images, broker, users ----------------------------------------------------------
 
-"$CLTL_ROOT/scripts/sync-rabbitmq-cert.sh" --seed
+as_root "$CLTL_ROOT/scripts/sync-rabbitmq-cert.sh" --seed
 
 log "Pulling images (first run: several GB)"
 compose pull -q
@@ -286,19 +387,23 @@ reconcile_tenants "$hostname" "$ids"
 # --- 8. systemd ---------------------------------------------------------------------------
 
 log "Installing systemd units"
-cat > /etc/systemd/system/cltl-server.service << EOF
+write_root_file /etc/systemd/system/cltl-server.service << EOF
 # Installed by $CLTL_ROOT/scripts/install-server.sh
 [Unit]
 Description=cltl-apps server deployment ($CLTL_ROOT)
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
+RequiresMountsFor=$CLTL_ROOT
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+User=$run_user
+SupplementaryGroups=docker
 WorkingDirectory=$CLTL_ROOT
-ExecStartPre=$CLTL_ROOT/scripts/sync-rabbitmq-cert.sh --seed
+# "+": as root, which writing RabbitMQ's (uid 999) certificate files needs.
+ExecStartPre=+$CLTL_ROOT/scripts/sync-rabbitmq-cert.sh --seed
 # Images are pulled by the installer; a boot must not depend on the registry.
 ExecStart=$CLTL_ROOT/scripts/server-compose.sh up -d --wait --pull missing
 ExecStop=$CLTL_ROOT/scripts/server-compose.sh down
@@ -308,19 +413,20 @@ TimeoutStartSec=30min
 WantedBy=multi-user.target
 EOF
 
-cat > /etc/systemd/system/cltl-rabbitmq-cert.service << EOF
+write_root_file /etc/systemd/system/cltl-rabbitmq-cert.service << EOF
 # Installed by $CLTL_ROOT/scripts/install-server.sh
 [Unit]
 Description=Copy caddy's certificate to RabbitMQ's AMQPS listener
 After=cltl-server.service
 Requisite=cltl-server.service
+RequiresMountsFor=$CLTL_ROOT
 
 [Service]
 Type=oneshot
 ExecStart=$CLTL_ROOT/scripts/sync-rabbitmq-cert.sh
 EOF
 
-cat > /etc/systemd/system/cltl-rabbitmq-cert.timer << EOF
+write_root_file /etc/systemd/system/cltl-rabbitmq-cert.timer << EOF
 # Installed by $CLTL_ROOT/scripts/install-server.sh
 [Unit]
 Description=Daily sync of caddy's certificate to RabbitMQ
@@ -334,16 +440,16 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-systemctl daemon-reload
-systemctl enable -q cltl-server.service cltl-rabbitmq-cert.timer
+as_root systemctl daemon-reload
+as_root systemctl enable -q cltl-server.service cltl-rabbitmq-cert.timer
 log "Starting the deployment (first run: ASR downloads its Whisper model)"
-systemctl restart cltl-server.service
-systemctl start cltl-rabbitmq-cert.timer
+as_root systemctl restart cltl-server.service
+as_root systemctl start cltl-rabbitmq-cert.timer
 
 # --- 9. Certificate ---------------------------------------------------------------------
 
 log "Waiting for caddy's certificate for $hostname"
-"$CLTL_ROOT/scripts/sync-rabbitmq-cert.sh" --wait 300
+as_root "$CLTL_ROOT/scripts/sync-rabbitmq-cert.sh" --wait 300
 
 # --- 10. Checks -----------------------------------------------------------------------------
 
@@ -389,11 +495,13 @@ cltl-apps server on https://$hostname
 
   Tenant URLs       $CLTL_TENANTS_URLS
   All secrets       $CLTL_CREDENTIALS_FILE
+  Docker data       $current_root
 
 The cloud security group must allow inbound TCP 80, 443 and 5671.
-Add a tenant:       sudo $CLTL_ROOT/scripts/add-tenant.sh <id>
-Operate:            sudo $CLTL_ROOT/scripts/server-compose.sh ps|logs|...
-Upgrade:            sudo $CLTL_ROOT/scripts/install-server.sh
+Add a tenant:       $CLTL_ROOT/scripts/add-tenant.sh <id>
+Operate:            $CLTL_ROOT/scripts/server-compose.sh ps|logs|...
+Upgrade:            $CLTL_ROOT/scripts/install-server.sh
+(as $run_user, without sudo; log in again first if this run added you to the docker group)
 EOF
 
 if ((failures)); then

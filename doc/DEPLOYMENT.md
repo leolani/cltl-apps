@@ -543,27 +543,52 @@ described above — and keeps it running across reboots. Before running it:
 2. Open inbound TCP **80, 443 and 5671** in the cloud provider's security
    group (and 22 for yourself). Nothing else needs to be reachable; the
    script does not configure a host firewall.
-3. Optionally, write a tenant list: one tenant id per line, `#` comments
+3. Attach a data volume and mount it, e.g. at `~/data/<volume>`, writable by
+   your login user (`sudo chown $USER: ~/data/<volume>` if it is not).
+   Everything large goes there; the root disk only holds the OS.
+4. Optionally, write a tenant list: one tenant id per line, `#` comments
    allowed.
 
-Then, on the machine:
+Then, on the machine, **as your normal login user** (not with `sudo`; the
+script asks sudo for the few steps that need root):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-server.sh \
-    | sudo bash -s -- --hostname combot.example.org --email you@example.org \
-                      --tenants tenants.txt
+    | bash -s -- --dir ~/data/<volume>/cltl-apps \
+                 --hostname combot.example.org --email you@example.org \
+                 --tenants tenants.txt
 ```
 
-It clones this repository into `/opt/cltl-apps` (`--dir`, `--repo`, `--ref`
-to change that) and runs itself from there; from an existing checkout,
-`sudo scripts/install-server.sh ...` does the same in place. `--help` lists
-every option. A first run takes a while: several GB of images, then the ASR
-module downloads its Whisper model.
+It clones this repository into `--dir` (`--repo`, `--ref` to choose what)
+and runs itself from there; from an existing checkout,
+`scripts/install-server.sh ...` does the same in place and needs no `--dir`.
+`--help` lists every option. A first run takes a while: several GB of
+images, then the ASR module downloads its Whisper model.
+
+On the volume, that gives:
+
+| Path | Holds | Owner |
+|---|---|---|
+| `<volume>/cltl-apps/` | the checkout, `config/` and its secrets | you |
+| `<volume>/cltl-apps/storage/` | event bus data, EMISSOR scenarios, audio, images, and `cache/` with the downloaded ASR models | root (the containers write it), RabbitMQ's parts uid 999 |
+| `<volume>/docker/`, `<volume>/containerd/` | Docker's containers and volumes (caddy's certificates among them), and its images | root |
+
+`--docker-root DIR` puts the last two somewhere else. `storage/` is the
+application's: read it, copy from it, but leave changing it to the modules.
+The installer warns if the checkout turns out to be on the root disk after
+all.
 
 What it does:
 
 - installs Docker Engine and the Compose plugin from Docker's apt repository,
-  if `docker compose` is not already there;
+  if `docker compose` is not already there, and points its data roots
+  (`/etc/docker/daemon.json`, `root` in `/etc/containerd/config.toml`) at the
+  volume, with a drop-in so that neither starts before the volume is
+  mounted. A Docker that was already installed is left as it is, with a
+  warning; see [Moving Docker's data to the
+  volume](#moving-dockers-data-to-the-volume);
+- adds you to the `docker` group, so the scripts below work without sudo
+  from your next login on. That group is root-equivalent on this machine;
 - populates `config/` from `templates/common` and `templates/server`, and
   sets `CLTL_HOSTNAME`, `CLTL_ACME_EMAIL`, `VERSION` and the `127.0.0.1`
   binds in `config/server.env`;
@@ -573,7 +598,8 @@ What it does:
 - checks that the hostname resolves to this machine;
 - creates the RabbitMQ users for the tenants (below);
 - installs and starts `cltl-server.service` (the stack, via
-  `scripts/server-compose.sh`) and `cltl-rabbitmq-cert.timer` (a daily
+  `scripts/server-compose.sh`, run as you and waiting for the volume at
+  boot) and `cltl-rabbitmq-cert.timer` (a daily, root
   `scripts/sync-rabbitmq-cert.sh`, which hands caddy's renewed certificate to
   RabbitMQ without restarting it);
 - checks the result from this machine: the module ports are loopback-only,
@@ -582,8 +608,9 @@ What it does:
 
 | File | Holds |
 |---|---|
-| `config/credentials` | every generated secret (root-only). Not `credentials.config`, which the platform would load into every module |
-| `config/tenants.urls` | one `<id> amqps://<id>:<password>@<hostname>:5671/` line per tenant user (root-only) |
+| `config/credentials` | every generated secret (yours only, mode 600). Not `credentials.config`, which the platform would load into every module |
+| `config/tenants.urls` | one `<id> amqps://<id>:<password>@<hostname>:5671/` line per tenant user (yours only) |
+| `config/install.state` | where Docker's data went, so a re-run decides the same way |
 | `config/server.env`, `config/custom.config` | as in any server checkout, plus the values above |
 | `storage/rabbitmq-tls/` | RabbitMQ's copy of caddy's certificate |
 
@@ -606,16 +633,21 @@ the `rabbitmqctl delete_user` command to remove it. To add one tenant
 without the installer:
 
 ```bash
-sudo scripts/add-tenant.sh tenant-c     # prints its amqps:// URL
+scripts/add-tenant.sh tenant-c          # prints its amqps:// URL
 ```
 
 ### Running it
 
 ```bash
-sudo scripts/server-compose.sh ps                 # or logs -f caddy, restart eliza-asr, ...
-sudo systemctl status cltl-server                 # the stack, started at boot
-sudo scripts/install-server.sh                    # upgrade: pull checkout + images, restart
+scripts/server-compose.sh ps                      # or logs -f caddy, restart eliza-asr, ...
+systemctl status cltl-server                      # the stack, started at boot
+scripts/install-server.sh                         # upgrade: pull checkout + images, restart
 ```
+
+All three run as the checkout's owner, not with `sudo`; the scripts refuse
+another user, since files they write in `config/` would end up owned by it.
+Until you log in again after the first install, they fall back to sudo for
+Docker themselves.
 
 A re-run needs no flags: every value given once is kept in `config/`, and
 secrets are generated once and never rotated. Pass `--version <tag>` to pin
@@ -632,8 +664,32 @@ The last line should end in `Verify return code: 0 (ok)`. Then bring up one
 tenant against it, as [above](#a-tenant-of-a-public-server), and confirm the
 agent answers in that tenant's chat UI.
 
+### Moving Docker's data to the volume
+
+The installer moves Docker's data only on a Docker it installs itself, when
+there is nothing to move yet. If Docker was there before, it warns and
+leaves it in `/var/lib/docker` and `/var/lib/containerd`. To move it by hand
+(the stack is down for the duration):
+
+```bash
+sudo systemctl stop cltl-server docker.socket docker containerd
+sudo rsync -aHAX /var/lib/docker/ ~/data/<volume>/docker/
+sudo rsync -aHAX /var/lib/containerd/ ~/data/<volume>/containerd/
+echo '{ "data-root": "'"$HOME"'/data/<volume>/docker" }' | sudo tee /etc/docker/daemon.json   # merge, if it exists
+sudo sed -i '1i root = "'"$HOME"'/data/<volume>/containerd"' /etc/containerd/config.toml
+sudo systemctl start containerd docker cltl-server
+docker info -f '{{.DockerRootDir}}'                # the new path
+```
+
+Once it runs, remove the old directories. Add the `RequiresMountsFor=`
+drop-ins the installer would have written (`/etc/systemd/system/docker.service.d/cltl-data.conf`,
+the same for `containerd`), or Docker may start on an empty mountpoint at boot.
+
+### Testing the installer
+
 `scripts/test/run.sh` runs the installer end to end in a throwaway systemd
-container, with Pebble standing in for Let's Encrypt.
+container, as its `ubuntu` user onto a Docker volume standing in for the
+attached one, with Pebble standing in for Let's Encrypt.
 
 ## Recording from the camera
 

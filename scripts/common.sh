@@ -1,22 +1,28 @@
 # shellcheck shell=bash disable=SC2034
-# Shared by scripts/install-server.sh, scripts/add-tenant.sh and
-# scripts/sync-rabbitmq-cert.sh. Sourced, never run; expects CLTL_ROOT to be
-# the checkout's root and the caller to have `set -euo pipefail`.
+# Shared by the scripts in scripts/. Sourced, never run; expects CLTL_ROOT to
+# be the checkout's root and the caller to have `set -euo pipefail`.
+#
+# The checkout belongs to the user who installed it, and everything here runs
+# as that user except what needs root: packages, systemd, /etc, and the
+# certificate files RabbitMQ (uid 999) reads. Those go through as_root.
 #
 # State this checkout keeps, all under the gitignored config/:
 #   config/server.env     Compose-time values (hostname, binds, the event
 #                         bus's admin password, which RabbitMQ itself needs)
-#   config/credentials    every generated secret, KEY=VALUE, root-only. Not
+#   config/credentials    every generated secret, KEY=VALUE, owner-only. Not
 #                         named credentials.config on purpose: the platform's
 #                         loader reads config/credentials.config into every
 #                         module's configuration.
 #   config/tenants.urls   one `<id> amqps://<id>:<password>@<host>:5671/` line
-#                         per tenant user, root-only; the passwords live here
+#                         per tenant user, owner-only; the passwords live here
 #                         and nowhere else.
+#   config/install.state  what the installer decided once and must decide the
+#                         same way on a re-run (where Docker keeps its data).
 
 CLTL_ENV_FILE="$CLTL_ROOT/config/server.env"
 CLTL_CREDENTIALS_FILE="$CLTL_ROOT/config/credentials"
 CLTL_TENANTS_URLS="$CLTL_ROOT/config/tenants.urls"
+CLTL_STATE_FILE="$CLTL_ROOT/config/install.state"
 CLTL_TLS_DIR="$CLTL_ROOT/storage/rabbitmq-tls"
 
 # The shared tenant user, created when the installer is given no tenant list.
@@ -39,6 +45,29 @@ die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 require_root() {
     [[ $EUID -eq 0 ]] || die "run as root (sudo $0 ...)"
+}
+
+require_owner() {
+    # Run as anyone else, a script here would leave files in config/ that
+    # their owner can no longer rewrite.
+    local owner
+    owner=$(stat -c %U "$CLTL_ROOT")
+    [[ $(id -un) == "$owner" ]] || die "run this as $owner, who owns $CLTL_ROOT (not with sudo)"
+}
+
+as_root() {
+    if [[ $EUID -eq 0 ]]; then "$@"; else sudo "$@"; fi
+}
+
+docker_cli() {
+    # Right after the installer adds the user to the docker group, their
+    # login session does not have it yet; sudo bridges that until they log in
+    # again. The systemd unit gets the group itself.
+    if [[ $EUID -ne 0 && -z ${DOCKER_HOST:-} && -S /var/run/docker.sock && ! -w /var/run/docker.sock ]]; then
+        sudo docker "$@"
+    else
+        docker "$@"
+    fi
 }
 
 generate_secret() {
@@ -208,7 +237,7 @@ reconcile_tenants() {  # hostname ids
     if [[ -n $extra ]]; then
         while IFS= read -r id; do
             warn "RabbitMQ user '$id' is not in config/tenants.urls; left in place." \
-                 "Remove it with: sudo $CLTL_ROOT/scripts/server-compose.sh exec rabbitmq rabbitmqctl delete_user $id"
+                 "Remove it with: $CLTL_ROOT/scripts/server-compose.sh exec rabbitmq rabbitmqctl delete_user $id"
         done <<< "$extra"
     fi
     local listed

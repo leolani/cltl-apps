@@ -202,11 +202,14 @@ docker run --rm --add-host=host.docker.internal:host-gateway curlimages/curl:8.1
 server half on a fresh Ubuntu 22.04/24.04 machine: Docker, `config/`, TLS
 for HTTP (caddy, Let's Encrypt) and for the event bus (AMQPS on 5671),
 generated credentials, one RabbitMQ user per tenant, and a systemd unit so it
-survives reboots:
+survives reboots. Run it as your login user (it uses sudo itself where needed),
+with `--dir` on the attached data volume, where the data, the models and
+Docker's images then go too:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-server.sh \
-    | sudo bash -s -- --hostname combot.example.org --email you@example.org --tenants tenants.txt
+    | bash -s -- --dir ~/data/<volume>/cltl-apps \
+                 --hostname combot.example.org --email you@example.org --tenants tenants.txt
 ```
 
 See [doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#installing-a-server-on-a-cloud-vm).

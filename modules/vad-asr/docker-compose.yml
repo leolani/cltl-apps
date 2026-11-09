@@ -22,6 +22,11 @@ services:
       - ../../storage:/cltl-vad/storage
     environment:
       - CLTL_LOGGING_CONFIG=/cltl-vad/config/logging.config
+      # Downloaded models (Whisper, Hugging Face, torch hub all honour
+      # XDG_CACHE_HOME) go to this checkout's storage/cache rather than the
+      # container's own /root/.cache, so they survive the container being
+      # recreated and sit with the rest of the deployment's data.
+      - XDG_CACHE_HOME=/cltl-vad/storage/cache
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -39,6 +44,8 @@ services:
       - ../../storage:/cltl-asr/storage
     environment:
       - CLTL_LOGGING_CONFIG=/cltl-asr/config/logging.config
+      # Same as for the VAD above.
+      - XDG_CACHE_HOME=/cltl-asr/storage/cache
     depends_on:
       rabbitmq:
         condition: service_healthy

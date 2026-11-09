@@ -14,13 +14,17 @@
 #                 (default: ../cltl-dev/cltl-combot/src next to this checkout)
 #   KEEP=1        leave the VM running afterwards, for poking at
 #
-# What it checks: a first install with a tenant list, the post-install checks,
-# per-tenant isolation and TLS from outside (bus_check.py), an idempotent
-# re-run with no flags, add-tenant.sh, certificate rotation without a broker
-# restart, a reboot, and the shared-user layout on a second install.
+# What it checks: a first install as the login user `ubuntu` onto an
+# "attached volume" with a tenant list, the post-install checks, file
+# ownership and where Docker and the models keep their data, per-tenant
+# isolation and TLS from outside (bus_check.py), an idempotent re-run with no
+# flags, add-tenant.sh, certificate rotation without a broker restart, a
+# reboot, and the shared-user layout on a second install.
 #
-# The VM's /var/lib/docker and /var/lib/containerd are named volumes (overlay
-# cannot sit on overlay), kept between runs so the images are pulled once.
+# The attached volume is the named Docker volume cltl-test-data-<release>,
+# mounted at /home/ubuntu/data/test (a real mountpoint, and not overlay, which
+# Docker's own storage cannot sit on). Each run wipes it except containerd/,
+# so the images are pulled once.
 set -euo pipefail
 
 UBUNTU=${1:-24.04}
@@ -31,11 +35,14 @@ COMBOT_SRC=${COMBOT_SRC:-$ROOT/../cltl-dev/cltl-combot/src}
 VM=cltl-test-vm
 IMAGE=cltl-test-vm:$UBUNTU
 HOST=cltl.test
+DATA=/home/ubuntu/data/test
+APP=$DATA/cltl-apps
 PEBBLE=ghcr.io/letsencrypt/pebble:latest
 WORK=$(mktemp -d)
 
 log() { printf '\n\033[1;35m### %s\033[0m\n' "$*" >&2; }
 vm() { docker exec "$VM" "$@"; }
+vmu() { docker exec -u ubuntu -w /home/ubuntu "$VM" "$@"; }
 cleanup() {
     rm -rf "$WORK"
     if [[ ${KEEP:-0} != 1 ]]; then docker rm -f "$VM" > /dev/null 2>&1 || true; fi
@@ -52,8 +59,8 @@ boot_vm() {
     docker rm -f "$VM" > /dev/null 2>&1 || true
     docker run -d --name "$VM" --hostname cltl-vm --privileged --cgroupns=host \
         -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
-        -v "cltl-test-docker-$UBUNTU:/var/lib/docker" \
-        -v "cltl-test-containerd-$UBUNTU:/var/lib/containerd" "$IMAGE" > /dev/null
+        --tmpfs /var/lib/docker --tmpfs /var/lib/containerd \
+        -v "cltl-test-data-$UBUNTU:$DATA" "$IMAGE" > /dev/null
     for _ in $(seq 60); do
         state=$(vm systemctl is-system-running 2> /dev/null || true)
         [[ $state == running || $state == degraded ]] && return 0
@@ -62,10 +69,15 @@ boot_vm() {
     echo "VM did not boot: $state" >&2; return 1
 }
 
+reset_volume() {  # before Docker is installed: keep only the pulled images
+    vm sh -c "find $DATA -mindepth 1 -maxdepth 1 ! -name containerd -exec rm -rf {} +; chown ubuntu: $DATA"
+}
+
 copy_checkout() {  # the working tree as it is, committed or not; no config/ or storage/ state
     (cd "$ROOT" && git ls-files -co --exclude-standard -z | tar --null -T - -cf "$WORK/src.tar")
-    vm mkdir -p /opt/cltl-apps
-    docker cp - "$VM:/opt/cltl-apps" < "$WORK/src.tar"
+    vmu mkdir -p "$APP"
+    docker cp - "$VM:$APP" < "$WORK/src.tar"
+    vm chown -R ubuntu: "$APP"
 }
 
 prepare_pebble() {
@@ -80,16 +92,15 @@ prepare_pebble() {
               if command -v docker > /dev/null; then
                   docker ps -aq | xargs -r docker rm -f > /dev/null
                   docker volume ls -q | grep caddy | xargs -r docker volume rm > /dev/null
-              else
-                  rm -rf /var/lib/docker/volumes/*caddy*
               fi'
     docker pull -q "$PEBBLE" > /dev/null
     id=$(docker create "$PEBBLE")
     docker cp "$id:/test/certs/pebble.minica.pem" "$WORK/pebble.minica.pem"
     docker rm "$id" > /dev/null
-    vm mkdir -p /opt/cltl-test /opt/cltl-apps/config
+    vm mkdir -p /opt/cltl-test
+    vmu mkdir -p "$APP/config"
     docker cp "$WORK/pebble.minica.pem" "$VM:/opt/cltl-test/pebble.minica.pem"
-    docker exec -i "$VM" sh -c 'cat > /opt/cltl-apps/config/compose.override.yml' << EOF
+    docker exec -i -u ubuntu "$VM" sh -c "cat > $APP/config/compose.override.yml" << EOF
 # Test only (scripts/test/run.sh): Pebble instead of Let's Encrypt.
 services:
   pebble:
@@ -112,7 +123,7 @@ EOF
 }
 
 install() {
-    vm /opt/cltl-apps/scripts/install-server.sh --no-pull --skip-dns-check \
+    vmu "$APP/scripts/install-server.sh" --no-pull --skip-dns-check \
         --acme-ca https://pebble:14000/dir --test-ca-file /opt/cltl-test/pebble-root.pem "$@"
 }
 
@@ -125,23 +136,36 @@ log "Building the Ubuntu $UBUNTU VM image"
 docker build -q --build-arg "UBUNTU=$UBUNTU" -t "$IMAGE" "$HERE" > /dev/null
 boot_vm
 VM_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$VM")
+reset_volume
 copy_checkout
 prepare_pebble
 printf '# test tenants\ntenant-a\ntenant-b  # second\n' | docker exec -i "$VM" sh -c 'cat > /opt/cltl-test/tenants.txt'
 
+log "Refusals"
+expect "refuses to run as root" sh -c "! docker exec $VM $APP/scripts/install-server.sh --no-pull > /dev/null 2>&1"
+expect "piped without --dir: asks for it" sh -c \
+    "docker exec -u ubuntu $VM sh -c 'bash -s -- --hostname $HOST < $APP/scripts/install-server.sh' 2>&1 | grep -q -- '--dir is required'"
+
 log "First install, with a tenant list"
 install --hostname "$HOST" --email ops@cltl.test --tenants /opt/cltl-test/tenants.txt
 expect "cltl-server.service active" vm systemctl is-active -q cltl-server.service
+expect "cltl-server.service runs as ubuntu" sh -c "docker exec $VM systemctl show -p User --value cltl-server | grep -qx ubuntu"
+expect "checkout and config/ belong to ubuntu" \
+    vm sh -c "test \"\$(stat -c %U $APP $APP/config $APP/config/* | sort -u)\" = ubuntu"
+expect "Docker keeps its data on the volume" sh -c "docker exec $VM docker info -f '{{.DockerRootDir}}' | grep -qx $DATA/docker"
+expect "containerd keeps the images on the volume" \
+    vm sh -c "test -n \"\$(ls -A $DATA/containerd/io.containerd.content.v1.content/blobs/sha256 2> /dev/null)\""
+expect "the Whisper model is cached in storage/cache" vm sh -c "ls $APP/storage/cache/whisper/*.pt > /dev/null 2>&1"
 expect "cert timer active" vm systemctl is-active -q cltl-rabbitmq-cert.timer
 expect "tenants.urls lists tenant-a and tenant-b" \
-    vm sh -c 'grep -q "^tenant-a amqps://tenant-a:" /opt/cltl-apps/config/tenants.urls \
-              && grep -q "^tenant-b amqps://tenant-b:" /opt/cltl-apps/config/tenants.urls'
-expect "secrets are root-only" \
-    vm sh -c 'test "$(stat -c %a /opt/cltl-apps/config/credentials /opt/cltl-apps/config/tenants.urls | sort -u)" = 600'
+    vm sh -c "grep -q '^tenant-a amqps://tenant-a:' $APP/config/tenants.urls \
+              && grep -q '^tenant-b amqps://tenant-b:' $APP/config/tenants.urls"
+expect "secrets are ubuntu's only" \
+    vm sh -c "test \"\$(stat -c '%a %U' $APP/config/credentials $APP/config/tenants.urls | sort -u)\" = '600 ubuntu'"
 expect "AMQPS serves Pebble's certificate" issuer_matches Pebble
 
 docker cp "$VM:/opt/cltl-test/pebble-root.pem" "$WORK/ca.pem"
-docker cp "$VM:/opt/cltl-apps/config/tenants.urls" "$WORK/tenants.urls"
+docker cp "$VM:$APP/config/tenants.urls" "$WORK/tenants.urls"
 
 log "From outside: TLS, isolation, closed ports"
 expect "bus_check.py" env PYTHONPATH="$COMBOT_SRC" "$PYTHON" "$HERE/bus_check.py" \
@@ -152,7 +176,7 @@ done
 expect "https://$HOST/storage/ needs Basic Auth" sh -c \
     "test \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $WORK/ca.pem --resolve $HOST:443:$VM_IP https://$HOST/storage/)\" = 401"
 
-admin_pw=$(vm sh -c "grep ^RABBITMQ_ADMIN_PASSWORD= /opt/cltl-apps/config/credentials | cut -d= -f2")
+admin_pw=$(vm sh -c "grep ^RABBITMQ_ADMIN_PASSWORD= $APP/config/credentials | cut -d= -f2")
 expect "RabbitMQ management API works through caddy with the admin's own login" sh -c \
     "test \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $WORK/ca.pem --resolve $HOST:443:$VM_IP \
            -u eliza:$admin_pw https://$HOST/rabbitmq/api/whoami)\" = 200"
@@ -162,24 +186,24 @@ expect "a tenant user cannot use the management API" sh -c \
            -u tenant-a:$tenant_a https://$HOST/rabbitmq/api/whoami)\" = 401"
 
 log "Re-run with no flags: same secrets, same tenants"
-before=$(vm sha256sum /opt/cltl-apps/config/credentials /opt/cltl-apps/config/tenants.urls)
+before=$(vm sha256sum $APP/config/credentials $APP/config/tenants.urls)
 install
-after=$(vm sha256sum /opt/cltl-apps/config/credentials /opt/cltl-apps/config/tenants.urls)
+after=$(vm sha256sum $APP/config/credentials $APP/config/tenants.urls)
 expect "credentials and tenants.urls unchanged" test "$before" = "$after"
 
 log "add-tenant.sh"
-vm /opt/cltl-apps/scripts/add-tenant.sh tenant-c
-docker cp "$VM:/opt/cltl-apps/config/tenants.urls" "$WORK/tenants.urls"
+vmu "$APP/scripts/add-tenant.sh" tenant-c
+docker cp "$VM:$APP/config/tenants.urls" "$WORK/tenants.urls"
 expect "tenant-c added, a and b kept" sh -c "grep -c '^tenant-[abc] ' $WORK/tenants.urls | grep -qx 3"
 expect "bus_check.py with tenant-c" env PYTHONPATH="$COMBOT_SRC" "$PYTHON" "$HERE/bus_check.py" \
     "$VM_IP" "$HOST" "$WORK/ca.pem" "$WORK/tenants.urls"
 
 log "Certificate rotation without restarting RabbitMQ"
 started=$(vm docker inspect -f '{{.State.StartedAt}}' cltl-platform-rabbitmq-1)
-vm sh -c 'rm -f /opt/cltl-apps/storage/rabbitmq-tls/*.pem && /opt/cltl-apps/scripts/sync-rabbitmq-cert.sh --seed \
-          && /opt/cltl-apps/scripts/server-compose.sh exec -T rabbitmq rabbitmqctl -q eval "ssl:clear_pem_cache()."' > /dev/null
+vm sh -c "rm -f $APP/storage/rabbitmq-tls/*.pem && $APP/scripts/sync-rabbitmq-cert.sh --seed \
+          && $APP/scripts/server-compose.sh exec -T rabbitmq rabbitmqctl -q eval 'ssl:clear_pem_cache().'" > /dev/null
 expect "a replaced certificate is served at once" issuer_matches "CN *= *$HOST"
-vm /opt/cltl-apps/scripts/sync-rabbitmq-cert.sh
+vm $APP/scripts/sync-rabbitmq-cert.sh
 expect "sync puts caddy's certificate back" issuer_matches Pebble
 expect "RabbitMQ was not restarted" test "$started" = "$(vm docker inspect -f '{{.State.StartedAt}}' cltl-platform-rabbitmq-1)"
 
@@ -195,12 +219,12 @@ expect "bus_check.py after reboot" env PYTHONPATH="$COMBOT_SRC" "$PYTHON" "$HERE
     "$VM_IP" "$HOST" "$WORK/ca.pem" "$WORK/tenants.urls"
 
 log "Second install without a tenant list: one shared user"
-vm sh -c 'systemctl disable -q --now cltl-server.service cltl-rabbitmq-cert.timer; rm -rf /opt/cltl-apps'
+vm sh -c "systemctl disable -q --now cltl-server.service cltl-rabbitmq-cert.timer; rm -rf $APP"
 copy_checkout
 prepare_pebble
 install --hostname "$HOST" --email ops@cltl.test
 docker cp "$VM:/opt/cltl-test/pebble-root.pem" "$WORK/ca.pem"
-docker cp "$VM:/opt/cltl-apps/config/tenants.urls" "$WORK/tenants.urls"
+docker cp "$VM:$APP/config/tenants.urls" "$WORK/tenants.urls"
 expect "only the shared tenant user" sh -c "grep -v '^#' $WORK/tenants.urls | cut -d' ' -f1 | paste -sd, | grep -qx tenant"
 expect "bus_check.py with the shared user" env PYTHONPATH="$COMBOT_SRC" "$PYTHON" "$HERE/bus_check.py" \
     "$VM_IP" "$HOST" "$WORK/ca.pem" "$WORK/tenants.urls"

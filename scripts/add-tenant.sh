@@ -2,7 +2,7 @@
 # Adds one tenant user to a server installed by scripts/install-server.sh,
 # without re-running the installer:
 #
-#   sudo scripts/add-tenant.sh tenant-c
+#   scripts/add-tenant.sh tenant-c
 #
 # The user is named after the tenant id and confined to routing keys ending
 # in it, exactly like the users created from a --tenants file. Its URL is
@@ -17,7 +17,7 @@ source "$CLTL_ROOT/scripts/common.sh"
 [[ $# -eq 1 && $1 != -* ]] || { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 id=$1
 
-require_root
+require_owner
 validate_tenant_id "$id"
 hostname=$(kv_get "$CLTL_ENV_FILE" CLTL_HOSTNAME)
 [[ -n $hostname ]] || die "no CLTL_HOSTNAME in $CLTL_ENV_FILE; run scripts/install-server.sh first"

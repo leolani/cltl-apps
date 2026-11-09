@@ -84,7 +84,7 @@ while :; do
     [[ -n $crt ]] && break
     if ((SECONDS >= deadline)); then
         if ((wait_seconds > 0)); then
-            die "caddy has no certificate for $hostname after ${wait_seconds}s; see: sudo $CLTL_ROOT/scripts/server-compose.sh logs caddy"
+            die "caddy has no certificate for $hostname after ${wait_seconds}s; see: $CLTL_ROOT/scripts/server-compose.sh logs caddy"
         fi
         log "caddy has no certificate for $hostname yet; nothing to do"
         exit 0

@@ -4,8 +4,8 @@
 # list lives, so the installer, the systemd unit, add-tenant.sh and a person
 # at the shell all run the same project:
 #
-#   sudo scripts/server-compose.sh ps
-#   sudo scripts/server-compose.sh logs -f caddy
+#   scripts/server-compose.sh ps
+#   scripts/server-compose.sh logs -f caddy
 #
 # Any arguments are passed straight to `docker compose`. A
 # config/compose.override.yml, if present, is merged in last: a local,
@@ -15,6 +15,8 @@
 set -euo pipefail
 
 CLTL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/common.sh
+source "$CLTL_ROOT/scripts/common.sh"
 cd "$CLTL_ROOT"
 
 files=(
@@ -29,4 +31,4 @@ if [[ -f config/compose.override.yml ]]; then
     files+=(-f config/compose.override.yml)
 fi
 
-exec docker compose --env-file config/server.env "${files[@]}" "$@"
+docker_cli compose --env-file config/server.env "${files[@]}" "$@"
