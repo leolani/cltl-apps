@@ -9,8 +9,7 @@ VENV_DIR="$(dirname "$0")/venv"
 # main) lack the /sound endpoint that [cltl.backend.text_output] remote_type:
 # sound posts speech to, and emissor is listed explicitly so cltl.combot's own
 # dependency on it does not resolve to PyPI's. Moving refs are installed once;
-# delete venv/ to pick up newer commits. Building emissor from git only works
-# cleanly on Python 3.10 (see requirements.notebook.txt).
+# delete venv/ to pick up newer commits.
 REQUIREMENTS=(
     'emissor @ git+https://github.com/leolani/emissor.git@ref_scenarios'
     'cltl.combot @ git+https://github.com/leolani/cltl-combot.git@ref_scenarios'
@@ -19,11 +18,10 @@ REQUIREMENTS=(
 
 # Keyed on leoserv, not the directory, so an interrupted install is retried.
 if [ ! -x "$VENV_DIR/bin/leoserv" ]; then
-    # Python 3.10, for emissor (above). CLTL_PYTHON names another interpreter.
-    PYTHON="${CLTL_PYTHON:-python3.10}"
+    # CLTL_PYTHON names another interpreter than python3.
+    PYTHON="${CLTL_PYTHON:-python3}"
     if ! command -v "$PYTHON" >/dev/null 2>&1; then
-        echo "$PYTHON not found. Install Python 3.10 (e.g. apt install python3.10-venv," >&2
-        echo "brew install python@3.10), or set CLTL_PYTHON to a Python 3.10 interpreter." >&2
+        echo "$PYTHON not found; install Python 3, or set CLTL_PYTHON to an interpreter." >&2
         exit 1
     fi
     echo "Creating virtual environment at $VENV_DIR with $PYTHON ..."

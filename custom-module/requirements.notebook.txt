@@ -11,9 +11,10 @@
 # cltl-dev actually builds is exactly the trap ../CLAUDE.md warns about
 # ("Pinned source != the source in cltl-dev").
 #
-# emissor's setup.py still declares `namespace_packages=['emissor']`, a
-# pkg_resources-era API that only resolves cleanly under Python 3.10 — use
-# that interpreter for this venv, not a newer one.
+# emissor's setup.py still declares `namespace_packages=['emissor']`, but with
+# no emissor/__init__.py: setuptools installs an importlib-based -nspkg.pth, not
+# pkg_resources, so it is not tied to Python 3.10 (built and imported, with
+# cltl.combot, on 3.13). Python 3.10 is still what the platform images run.
 git+https://github.com/leolani/emissor.git@ref_scenarios
 cltl.combot[external] @ git+https://github.com/leolani/cltl-combot.git@ref_scenarios
 # For one class, ClientImageSource — the platform's client for the image

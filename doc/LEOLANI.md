@@ -218,7 +218,7 @@ Event-bus-server:
 In addition to the Docker images, this application also needs the following to run the backend server that captures the audio from the microphone:
 
 | Requirement | Minimum version | Notes |
-| Python | 3.10 | For the host backend server (audio capture); `emissor` built from git installs cleanly only on 3.10 |
+| Python | 3.8+ | For the host backend server (audio capture); 3.10–3.13 on Windows, where PyAudio has wheels only up to 3.13 |
 | PortAudio | — | `portaudio19-dev` on Debian/Ubuntu; `portaudio` via Homebrew on macOS; bundled in the PyAudio wheel on Windows |
 
 ### How to run ELIZA-talk from the command line:
