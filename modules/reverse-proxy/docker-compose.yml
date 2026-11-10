@@ -43,7 +43,10 @@ services:
       # Basic Auth credential, and an http:// URL mistyped by a client would
       # otherwise be redirected to https:// with a 308 (which preserves the
       # method and succeeds) — leaking that credential in clear text on the
-      # way. With the redirect off, the same mistake gets a plain 404.
+      # way. With the redirect off, caddy has no server on 80 at all: it
+      # listens there only for the length of an HTTP-01 challenge, so the
+      # same mistake gets a connection reset.
+      # The publish still has to stay, and so does the firewall rule.
       - "80:80"
       - "443:443"
     volumes:

@@ -14,8 +14,9 @@
 	email {$CLTL_ACME_EMAIL}
 	acme_ca {$CLTL_ACME_CA}
 
-	# Port 80 stays open for the ACME HTTP-01 challenge alone. What it must
-	# NOT do is redirect to 443 — see ./docker-compose.yml.
+	# Port 80 is for the ACME HTTP-01 challenge alone, and caddy listens on
+	# it only while one runs. What it must NOT do is redirect to 443 — see
+	# ./docker-compose.yml.
 	auto_https disable_redirects
 }
 

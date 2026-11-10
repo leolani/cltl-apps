@@ -466,8 +466,9 @@ protocols:
 
 Then the module's own ports — 5672, 8001, 8002, 15672 — are bound to
 `127.0.0.1`, leaving 80, 443 and 5671 as the only ways in. Port 80 serves the
-ACME challenge and nothing else; it does not redirect, so that a mistyped
-`http://` URL cannot leak a credential.
+ACME challenge and nothing else, and only while one runs: at any other time a
+connection to it is reset. It never redirects, so that a mistyped `http://`
+URL cannot leak a credential.
 
 **Use [`scripts/install-server.sh`](#installing-a-server-on-a-cloud-vm)**
 rather than doing this by hand. Beyond the bring-up command below, a public
