@@ -4,6 +4,9 @@ Deployment stacks for the Leolani conversational-agent platform, assembled
 from published `ghcr.io/leolani/cltl-*` images — plus a template for
 attaching your own code to one.
 
+> **New here?** Start with [`doc/GETTING-STARTED.md`](doc/GETTING-STARTED.md):
+> a step-by-step installation guide for Windows, Linux and macOS.
+
 There are two independent things to choose here, and keeping them apart is
 the quickest way to understand this repository:
 
