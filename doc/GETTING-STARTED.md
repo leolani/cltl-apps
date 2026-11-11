@@ -282,48 +282,9 @@ Open <http://localhost:8003/chatui/static/chat.html> in your browser.
 **Expected:** after a few seconds the agent greets you with something like
 *"Hello! Do you want to talk to me?"*
 
-If you type an answer now, **you will not get a reply**. That is correct: the
-server's dialogue engine, ELIZA, answers on a separate channel (`eliza_out`)
-so that it can be replaced by your own module (see [section 6](#6-replacing-eliza-with-your-own-module)).
-Your installation works if you see the greeting.
-
-### 4.4 See ELIZA answer
-
-To see ELIZA's replies in the chat, tell the chat window to show them too.
-Open the tenant's `config/custom.config` again and add these two lines at the
-very end:
-
-```ini
-[cltl.chat-ui.events]
-topic_response: cltl.topic.text_out, cltl.topic.eliza_out
-```
-
-(If the file already contains an *uncommented* `[cltl.chat-ui.events]` line,
-add only the `topic_response` line below it instead, to keep the file easy to
-read.)
-
-Save, and restart the tenant — the same command as in 4.2, with `restart` in
-place of `up -d --wait --pull always`:
-
-**Linux / macOS:**
-```bash
-docker compose --env-file config/tenant.env \
-    -f modules/backend/docker-compose.yml \
-    -f modules/context/docker-compose.yml \
-    -f modules/chat-ui/docker-compose.yml \
-    -f modules/monitoring/docker-compose.yml restart
-```
-
-**Windows (PowerShell, one line):**
-```powershell
-docker compose --env-file config/tenant.env -f modules/backend/docker-compose.yml -f modules/context/docker-compose.yml -f modules/chat-ui/docker-compose.yml -f modules/monitoring/docker-compose.yml restart
-```
-
-Wait about 20 seconds and reload the chat page.
-
-**Expected:** the greeting, and then an answer to everything you type. Reply
-*yes* to the greeting first; ELIZA then answers, for example *"I feel a bit
-tired today"* → *"When you feel a bit tired today, what do you do?"*
+Reply *yes* to the greeting first. The server's dialogue engine, ELIZA, then
+answers everything you type, for example *"I feel a bit tired today"* →
+*"When you feel a bit tired today, what do you do?"*
 
 You now have a complete working installation. 🎉
 
@@ -408,8 +369,7 @@ image_storage: remote
 storage_url: https://storage-user:pa55word@combot.example.org/storage
 ```
 
-Leave everything else as it is — including the text-only lines and the
-`[cltl.chat-ui.events]` lines from scenario A.
+Leave everything else as it is, including the text-only lines from 4.2.
 
 ### 5.4 Restart the tenant
 
@@ -438,15 +398,55 @@ docker compose --env-file config/tenant.env -f modules/backend/docker-compose.ym
 ```
 
 **Expected:** all four containers *Healthy*. Open
-<http://localhost:8003/chatui/static/chat.html>: you get the greeting, and —
-because you kept the `[cltl.chat-ui.events]` lines from 4.4 — ELIZA's answers
-from the course server. Without those lines you get the greeting only, exactly
-as in 4.3.
+<http://localhost:8003/chatui/static/chat.html>: you get the greeting.
+
+If you type an answer now, **you will not get a reply**. That is correct: on
+the course server, ELIZA answers on a separate channel (`eliza_out`), so that
+your own module can take its place (see [section 6](#6-replacing-eliza-with-your-own-module)).
+Your connection works if you see the greeting.
 
 If a container is *unhealthy*, see [Troubleshooting](#9-troubleshooting).
 
+### 5.5 See ELIZA answer
+
+To see ELIZA's replies in the chat, tell the chat window to show that channel
+too. Open the tenant's `config/custom.config` again and add these two lines at
+the very end:
+
+```ini
+[cltl.chat-ui.events]
+topic_response: cltl.topic.text_out, cltl.topic.eliza_out
+```
+
+(If the file already contains an *uncommented* `[cltl.chat-ui.events]` line,
+add only the `topic_response` line below it instead, to keep the file easy to
+read.)
+
+Save, and restart the tenant — the tenant command from 5.4, with `restart` in
+place of `up -d --wait --pull always`:
+
+**Linux / macOS:**
+```bash
+docker compose --env-file config/tenant.env \
+    -f modules/backend/docker-compose.yml \
+    -f modules/context/docker-compose.yml \
+    -f modules/chat-ui/docker-compose.yml \
+    -f modules/monitoring/docker-compose.yml restart
+```
+
+**Windows (PowerShell, one line):**
+```powershell
+docker compose --env-file config/tenant.env -f modules/backend/docker-compose.yml -f modules/context/docker-compose.yml -f modules/chat-ui/docker-compose.yml -f modules/monitoring/docker-compose.yml restart
+```
+
+Wait about 20 seconds and reload the chat page.
+
+**Expected:** the greeting, and after you reply *yes*, ELIZA's answers from
+the course server.
+
 **Going back to scenario A** is the same change in reverse: put the four
-original values back (they are also in `templates/tenant/config/custom.config`),
+original values from 5.3 back (they are also in
+`templates/tenant/config/custom.config`), remove the two lines from 5.5,
 start the local server, and restart the tenant.
 
 ---
@@ -456,20 +456,29 @@ start the local server, and restart the tenant.
 ELIZA is a stand-in. The platform is built so that you can replace the
 agent's replies with your own code:
 
-- The chat window shows whatever is sent on the **`cltl.topic.text_out`**
-  channel. Your module listens to what the user says, on
-  **`cltl.topic.text_in`**, and sends its reply on `cltl.topic.text_out`.
-- ELIZA's own reply keeps arriving on **`cltl.topic.eliza_out`**. Your module
-  may listen to it too, for example to use, rewrite or ignore ELIZA's
-  suggestion.
-- When your module answers, **remove** the `[cltl.chat-ui.events]` lines you
-  added in 4.4 and restart the tenant, so that the chat window shows your
-  module's reply only, not ELIZA's as well.
-- In **scenario A** you can also turn ELIZA off entirely: leave the line
-  `-f modules/eliza/docker-compose.yml` out of the server command in 4.1
-  (stop the server with `down` first, using the full command *with* that
-  line). In scenario B ELIZA keeps running on the course server; it simply
-  goes unseen once you removed the lines from 4.4.
+- The chat window, and the speaker, use whatever is sent on the
+  **`cltl.topic.text_out`** channel. Your module listens to what the user
+  says, on **`cltl.topic.text_in`**, and sends its reply on
+  `cltl.topic.text_out`.
+- ELIZA must then stop answering on `text_out` too, or every message gets two
+  replies:
+  - **Scenario B:** the course server already sends ELIZA's replies to
+    **`cltl.topic.eliza_out`** instead. **Remove** the two lines you added in
+    5.5 and restart the tenant, so that the chat window shows your module's
+    reply only.
+  - **Scenario A:** either turn ELIZA off — leave the line
+    `-f modules/eliza/docker-compose.yml` out of the server command in 4.1
+    (stop the server with `down` first, using the full command *with* that
+    line) — or make your local server behave like the course server: in the
+    **server** folder's `config/custom.config`, remove the `# ` in front of
+    the two lines
+    ```ini
+    # [cltl.eliza]
+    # topic_output: cltl.topic.eliza_out
+    ```
+    and restart the server (the server command from 4.1 with `restart`).
+- With ELIZA on `cltl.topic.eliza_out`, your module may listen to that channel
+  too, for example to use, rewrite or ignore ELIZA's suggestion.
 
 How to write such a module — in a Jupyter notebook, as a Python script or as
 a container — is explained in [`custom-module/`](../custom-module/README.md).
@@ -543,14 +552,15 @@ by closing its window on Windows).
 
 ### 7.4 Restart the tenant
 
-Run the `restart` command from 4.4 in the tenant folder. Reload the chat page
-and speak: what you say appears in the chat as text, and the replies are read
-out loud.
+Run the tenant command from 4.2 with `restart` in place of
+`up -d --wait --pull always`, in the tenant folder. Reload the chat page and
+speak: what you say appears in the chat as text, and the replies are read out
+loud.
 
-**ELIZA's spoken replies.** The chat window can show several channels, but the
-speaker can only follow one. To hear ELIZA's answers (instead of only reading
-them), add this to the tenant's `config/custom.config` and restart the tenant
-again:
+**ELIZA's spoken replies in scenario B.** The course server sends ELIZA's
+replies to `eliza_out` (see 5.5). The chat window can show several channels,
+but the speaker can only follow one. To hear ELIZA's answers there, add this
+to the tenant's `config/custom.config` and restart the tenant again:
 
 ```ini
 [cltl.backend.tts]
@@ -610,7 +620,8 @@ docker image prune -a
 |---|---|---|
 | `container cltl-platform-eliza-asr-1 is unhealthy` on the first server start | The speech model is still downloading | Wait a minute and run the same `up` command again |
 | The chat page loads but no greeting appears | The tenant is not connected to a server, or the server is not running | Check `ps` in both folders (A) or your settings in 5.3 (B). Then `restart` the tenant |
-| Greeting appears, but no answers | ELIZA answers on `eliza_out`, which the chat window does not show by default | See [4.4](#44-see-eliza-answer) |
+| **B:** greeting appears, but no answers | The course server's ELIZA answers on `eliza_out`, which the chat window does not show by default | See [5.5](#55-see-eliza-answer) |
+| **A:** greeting appears, but no answers | ELIZA on your local server is not running, or you answered before replying *yes* | Check `ps` in the server folder; reload the chat page and reply *yes* first |
 | Answers stop after a while | The conversation was ended (typing *Bye* ends it) | Reload the chat page |
 | `permission denied ... /var/run/docker.sock` (Linux) | You are not in the `docker` group yet | Do step 2 of the Linux prerequisites, then log out and in |
 | `Cannot connect to the Docker daemon` / `docker: command not found` | Docker (Desktop) is not running | Start Docker Desktop and wait for *Engine running* |
