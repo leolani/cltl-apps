@@ -1,0 +1,56 @@
+# Object and scene recognition with a vision-language model (cltl-vlm-object,
+# github.com/leolani/cltl-custom-vlm-object-recognition). For every
+# ImageSignalEvent on [cltl.vlm_object_recognition.events] image_topic it
+# fetches the pixels from [cltl.backend] storage_url, asks the VLM at
+# [cltl.vlm_object_recognition] host for a scene label, a one-sentence
+# description and up to ten labelled bounding boxes, and publishes them as one
+# ObjectRecognitionEvent on object_topic.
+#
+# Part of a GPU server deployment (templates/gpu-server), where the VLM is
+# modules/ollama: Ollama serves the same OpenAI-compatible /v1 API as
+# llama-server, so pointing host and model at it in config/custom.config is
+# all it takes. Unlike llama-server, Ollama does NOT ignore the model name, so
+# [cltl.vlm_object_recognition] model has to be a tag already pulled there.
+#
+# Untenanted, like modules/eliza: it binds `<image_topic>.#` and answers every
+# tenant. Each result is published with the incoming event as its source, so it
+# keeps that event's tenant and scenario and goes back to the tenant who sent
+# the picture.
+#
+# Needs modules/event-bus in the same invocation (the depends_on below only
+# resolves for a service defined in the same merged project), the storage the
+# chat UI uploads to (modules/backend), and a VLM. It has no depends_on on
+# ollama: it calls the VLM only per image, so it starts without one, and a
+# depends_on would make Compose refuse every -f list without modules/ollama
+# (`required: false` does not help — an undefined service is still an error).
+#
+#   docker compose --env-file config/server.env --env-file config/gpu-server.env \
+#       -f ../event-bus/docker-compose.yml -f ../backend/docker-compose.yml \
+#       -f ../ollama/docker-compose.yml -f docker-compose.yml up -d --wait --pull always
+
+name: ${CLTL_PROJECT:-cltl-platform}
+
+services:
+  vlm-object:
+    image: ghcr.io/leolani/cltl-vlm-object:${VERSION:-latest}
+    volumes:
+      - ../../config/default.config:/cltl-vlm-object/config/default.config:ro
+      - ../../config/custom.config:/cltl-vlm-object/config/custom.config:ro
+      - ../../config/logging.config:/cltl-vlm-object/config/logging.config:ro
+      - ../../storage:/cltl-vlm-object/storage
+    environment:
+      - CLTL_LOGGING_CONFIG=/cltl-vlm-object/config/logging.config
+    # No published port: the module has no HTTP API of its own, only the
+    # /health on 8010 that the image's healthcheck probes.
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: ${CLTL_PROJECT:-cltl-platform}
+    driver: bridge

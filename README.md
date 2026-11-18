@@ -38,13 +38,14 @@ cltl-apps/
 │   ├── monitoring/      per-scenario view, embedded as a chat-ui tab
 │   ├── reverse-proxy/   optional TLS + auth in front of a public server
 │   ├── whisper/         GPU server: whisper.cpp speech recognition on the GPU
-│   └── ollama/          GPU server: a local LLM (vision model) on the GPU
+│   ├── ollama/          GPU server: a local LLM (vision model) on the GPU
+│   └── vlm-object/      GPU server: objects and scene in each image, via ollama
 ├── templates/        config to copy into a checkout's config/
 │   ├── common/         the platform baseline, shared by every role
 │   ├── standalone/     everything on one machine, no tenant
 │   ├── server/         the shared, untenanted half
 │   ├── tenant/         one tenant's user-facing half
-│   ├── gpu-server/     a server with GPU speech recognition and a local LLM
+│   ├── gpu-server/     a server with GPU speech recognition, a local LLM and object recognition
 │   └── module/         pointer at custom-module/, see below
 ├── custom-module/    template: attach your own code via the event bus
 ├── config/           THIS checkout's own config — generated, not tracked;
@@ -224,14 +225,17 @@ See [doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#installing-a-server-on-a-cloud-vm).
 
 On a machine with an NVIDIA GPU (driver 580 or newer),
 [`scripts/install-gpu-server.sh`](scripts/install-gpu-server.sh) installs the
-same public server, using the `templates/gpu-server` template, with two
+same public server, using the `templates/gpu-server` template, with three
 extra modules:
 
 - **speech recognition on the GPU** (`modules/whisper`, whisper.cpp with
   Whisper large-v3-turbo);
 - **a local LLM server** (`modules/ollama`, with the vision model
   `qwen3-vl:8b-instruct-q4_K_M`), reachable at `https://<host>/ollama/` for
-  your own modules. Nothing in the stock agent calls it yet.
+  your own modules;
+- **object recognition** (`modules/vlm-object`), which sends every uploaded
+  image to that model and publishes the scene and the objects it sees on
+  `cltl.topic.object_recognition`. The ELIZA dialogue does not use them.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-gpu-server.sh \

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Installs and starts a public cltl-apps GPU SERVER on Ubuntu 22.04 or 24.04
 # with an NVIDIA GPU: everything scripts/install-server.sh sets up, plus
-# speech recognition on the GPU (modules/whisper, whisper.cpp) and a local LLM
-# server (modules/ollama), configured from templates/gpu-server. See
+# speech recognition on the GPU (modules/whisper, whisper.cpp), a local LLM
+# server (modules/ollama) and object recognition with it (modules/vlm-object),
+# configured from templates/gpu-server. See
 # doc/DEPLOYMENT.md#a-gpu-server.
 #
 # Run it as your normal login user, not with sudo, exactly like
@@ -30,14 +31,16 @@
 #      templates/gpu-server (on a first run only — an existing one is kept);
 #   4. a `docker run --gpus all` smoke test, and only then
 #      config/gpu-server.env, whose presence makes scripts/server-compose.sh
-#      start modules/whisper and modules/ollama with the rest;
+#      start modules/whisper, modules/ollama and modules/vlm-object with the
+#      rest;
 #   5. the Ollama model, pulled into storage/ollama/;
 #   6. checks: a transcription, a generation on the GPU, and /ollama/ on 443
 #      refusing requests without the Basic Auth credential.
 #
 # Options of its own (everything else goes to install-server.sh, see its --help):
-#   --ollama-model TAG  the model to pull and name in config/custom.config
-#                       (default: qwen3-vl:8b-instruct-q4_K_M, a vision model).
+#   --ollama-model TAG  the model to pull and name in config/custom.config, for
+#                       [cltl.llm.ollama] and modules/vlm-object alike (default:
+#                       qwen3-vl:8b-instruct-q4_K_M; keep it a vision model).
 #                       Remembered; a model pulled earlier is not removed.
 #
 # Run it again at any time: it upgrades like install-server.sh, and every step
@@ -200,7 +203,13 @@ fi
 mkdir -p config
 [[ -f config/default.config ]] || cp templates/common/config/* config/
 [[ -f config/custom.config ]] || cp templates/gpu-server/config/custom.config config/
+# A custom.config from before modules/vlm-object has no section for it, and
+# the baseline's host is a llama-server on the host, not modules/ollama.
+grep -q '^\[cltl.vlm_object_recognition\]' config/custom.config \
+    || ini_set config/custom.config cltl.vlm_object_recognition host http://ollama:11434
 ini_set config/custom.config cltl.llm.ollama model "$ollama_model"
+# Ollama refuses a model it has not pulled, so the two must agree.
+ini_set config/custom.config cltl.vlm_object_recognition model "$ollama_model"
 kv_set "$CLTL_STATE_FILE" OLLAMA_MODEL "$ollama_model"
 
 # The ASR module must know [cltl.asr] implementation whisper_cpp, or it exits
@@ -213,8 +222,13 @@ asr_supports_whisper_cpp() {
     docker_cli run --rm --entrypoint python "$asr_image" -c \
         'import inspect, cltl_service.asr.container as c; exit("whisper_cpp" not in inspect.getsource(c))'
 }
+vlm_image=ghcr.io/leolani/cltl-vlm-object:${version:-latest}
 if command -v docker > /dev/null; then
     asr_supports_whisper_cpp || die "$asr_hint"
+    # Without it, `up --wait` fails for the whole server once
+    # config/gpu-server.env exists.
+    docker_cli pull -q "$vlm_image" > /dev/null \
+        || die "cannot pull $vlm_image; build and publish cltl-vlm-object, then run this again"
 fi
 
 log "Running install-server.sh"
@@ -238,7 +252,7 @@ if [[ ! -f config/gpu-server.env ]]; then
     chmod 600 config/gpu-server.env
 fi
 log "Starting the GPU modules"
-compose pull -q whisper ollama
+compose pull -q whisper ollama vlm-object
 as_root systemctl restart cltl-server.service
 
 # --- 7. The Ollama model --------------------------------------------------------------------
@@ -262,6 +276,8 @@ compose exec -T ollama ollama run "$ollama_model" "Answer with one word: OK" < /
 compose exec -T ollama ollama ps < /dev/null | grep -q 'GPU' || fail "ollama ps shows $ollama_model not on the GPU"
 compose exec -T ollama ollama show "$ollama_model" < /dev/null | grep -qw vision \
     || warn "$ollama_model is not a vision model; images will be refused"
+[[ $(compose ps --format '{{.Health}}' vlm-object) == healthy ]] \
+    || fail "vlm-object is not healthy (scripts/server-compose.sh logs vlm-object)"
 
 hostname=$(kv_get "$CLTL_ENV_FILE" CLTL_HOSTNAME)
 auth_user=$(kv_get "$CLTL_CREDENTIALS_FILE" BASIC_AUTH_USER)
@@ -286,11 +302,13 @@ GPU modules on https://$hostname (in addition to the server above)
                       Basic Auth $auth_user / $auth_password
                       e.g. curl -u $auth_user:<password> https://$hostname/ollama/api/chat \\
                                -d '{"model": "$ollama_model", "messages": [{"role": "user", "content": "Hi"}]}'
+  Object recognition  modules/vlm-object with $ollama_model: images on cltl.topic.image,
+                      results on cltl.topic.object_recognition
 
   Models              $CLTL_ROOT/storage/whisper, $CLTL_ROOT/storage/ollama
   On this host        127.0.0.1:8090 (whisper), 127.0.0.1:11434 (ollama)
 
-Nothing in the platform's own modules calls the LLM yet; see doc/DEPLOYMENT.md#a-gpu-server.
+Of the platform's own modules only vlm-object calls the LLM; see doc/DEPLOYMENT.md#a-gpu-server.
 EOF
 
 if ((failures)); then

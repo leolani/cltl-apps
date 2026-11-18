@@ -30,7 +30,8 @@ files=(
 env_files=(--env-file config/server.env)
 # A GPU server (templates/gpu-server, scripts/install-gpu-server.sh).
 if [[ -f config/gpu-server.env ]]; then
-    files+=(-f modules/whisper/docker-compose.yml -f modules/ollama/docker-compose.yml)
+    files+=(-f modules/whisper/docker-compose.yml -f modules/ollama/docker-compose.yml
+            -f modules/vlm-object/docker-compose.yml)
     env_files+=(--env-file config/gpu-server.env)
 fi
 if [[ -f config/compose.override.yml ]]; then

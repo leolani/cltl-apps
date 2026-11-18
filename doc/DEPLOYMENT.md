@@ -38,7 +38,8 @@ same three config files, and sets the same `extra_hosts`.
 | `monitoring` | `monitoring` | Optional per-scenario view, embedded as the chat UI's Monitoring tab |
 | `reverse-proxy` | `caddy` (+ a `rabbitmq` override) | Optional TLS and Basic Auth in front of a public server |
 | `whisper` | `whisper` | GPU server only: whisper.cpp's speech recognition server on the GPU, which `eliza-asr` sends its speech segments to. See [A GPU server](#a-gpu-server) |
-| `ollama` | `ollama` | GPU server only: a local LLM server (Ollama) with a vision model, for your own modules. See [A GPU server](#a-gpu-server) |
+| `ollama` | `ollama` | GPU server only: a local LLM server (Ollama) with a vision model, used by `vlm-object` and by your own modules. See [A GPU server](#a-gpu-server) |
+| `vlm-object` | `vlm-object` | GPU server only: recognises the scene and the objects in every image on `cltl.topic.image` with the vision model, publishing them on `cltl.topic.object_recognition`. See [A GPU server](#a-gpu-server) |
 
 ### `modules/backend` is one module, not two
 
@@ -71,6 +72,12 @@ merged project. So:
   `rabbitmq`, and must be brought up alongside `modules/event-bus`.
 - `context` and `chat-ui` each depend on `backend`, and must be brought up
   alongside `modules/backend`.
+- `vlm-object` depends on `rabbitmq` like the modules above. It also needs
+  a VLM at `[cltl.vlm_object_recognition] host` (on a GPU server
+  `modules/ollama`) and the storage the chat UI uploads to at `[cltl.backend]
+  storage_url`, but declares neither: it calls both only per image, and a
+  `depends_on` on `ollama` would make every `-f` list without it invalid,
+  `required: false` notwithstanding. So far only a GPU server runs it.
 - `monitoring` and `backend` declare no `depends_on` at all, so either can be
   brought up alone. `backend`'s lack of one is deliberate: a tenant
   deployment runs it with no local event bus, and a `depends_on` naming an
@@ -697,7 +704,7 @@ attached one, with Pebble standing in for Let's Encrypt.
 
 ## A GPU server
 
-A server (the role above) on a machine with an NVIDIA GPU, adding two
+A server (the role above) on a machine with an NVIDIA GPU, adding three
 modules:
 
 - **`modules/whisper`**: whisper.cpp's `whisper-server`, built with CUDA,
@@ -707,22 +714,33 @@ modules:
   the CPU. That switch is `[cltl.asr] implementation: whisper_cpp`, with the
   URL in `[cltl.asr.whisper_cpp]`.
 - **`modules/ollama`**: an Ollama server with a vision model,
-  `qwen3-vl:8b-instruct-q4_K_M`, which takes images as well as text. **No
-  module of the platform calls it yet**: the agent's dialogue is ELIZA, which
-  is rule-based. It is there for your own modules. On the server, a module
+  `qwen3-vl:8b-instruct-q4_K_M`, which takes images as well as text. Of the
+  platform's modules only `vlm-object` below calls it; the agent's dialogue is
+  ELIZA, which is rule-based. It is there for your own modules too. On the server, a module
   reaches it at `http://ollama:11434`; a tenant's module (`custom-module/`)
   uses `https://<host>/ollama/` with the same Basic Auth credential as
   `/storage`. Both the native API (`/api/chat`) and the OpenAI-compatible
   one (`/v1/chat/completions`) are served.
+- **`modules/vlm-object`**: object recognition
+  ([cltl-vlm-object](https://github.com/leolani/cltl-custom-vlm-object-recognition)).
+  For every image a tenant uploads in the chat UI's Image tab, it fetches the
+  pixels from the server's storage, asks Ollama's `/v1` API for a scene label,
+  a one-sentence description and up to ten labelled bounding boxes, and
+  publishes them as one `ObjectRecognitionEvent` on
+  `cltl.topic.object_recognition`, under the tenant and scenario of the image.
+  `[cltl.vlm_object_recognition]` holds the host and the model; the model
+  must be one Ollama has pulled, since Ollama, unlike llama-server, does not
+  ignore the name. Its image, `ghcr.io/leolani/cltl-vlm-object`, follows
+  `VERSION` like the platform's other images.
 
 `templates/gpu-server/` selects it. Its `custom.config` is the server's
-`custom.config` plus those two endpoints, with the model names fixed to what
+`custom.config` plus those three endpoints, with the model names fixed to what
 the server runs. It *replaces* the server's file, because a checkout has one
 `custom.config`. Its `gpu-server.env` only *adds* to `server.env`: image
 tags, the Whisper model file, and loopback ports for an operator.
 `scripts/server-compose.sh` takes the existence of `config/gpu-server.env`
-to mean that this checkout is a GPU server, and adds both modules and that
-env file.
+to mean that this checkout is a GPU server, and adds the three modules and
+that env file.
 
 ### Prerequisites
 
@@ -744,6 +762,9 @@ env file.
 - **A `cltl-asr` image that knows `whisper_cpp`.** Older images exit at start
   with `Unsupported implementation whisper_cpp`. The installer checks this
   before it changes anything.
+- **A published `ghcr.io/leolani/cltl-vlm-object` image** at the `VERSION`
+  the server runs. The installer checks that it can pull it before it changes
+  anything.
 
 Everything in [Installing a server on a cloud VM](#installing-a-server-on-a-cloud-vm)
 applies too: DNS name, inbound ports 80, 443 and 5671, the attached volume.
@@ -772,13 +793,16 @@ After `install-server.sh` has brought the server up, the script:
 
 1. Proves the GPU works with a `docker run --gpus all … nvidia-smi`.
 2. Only then puts `config/gpu-server.env` in place and restarts
-   `cltl-server.service` with both GPU modules.
+   `cltl-server.service` with the three GPU modules.
 3. Pulls the Ollama model into `storage/ollama/`.
-4. Checks that whisper transcribes, that Ollama generates on the GPU, and
-   that `/ollama/` refuses requests without the credential.
+4. Checks that whisper transcribes, that Ollama generates on the GPU, that
+   `vlm-object` is healthy, and that `/ollama/` refuses requests without the
+   credential.
 
-`--ollama-model <tag>` pulls another model and names it in
-`[cltl.llm.ollama]`; it is remembered for later runs. Run the script again
+`--ollama-model <tag>` pulls another model and names it in both
+`[cltl.llm.ollama]` and `[cltl.vlm_object_recognition]`; it is remembered
+for later runs. Keep it a vision model, or object recognition gets no
+answers. Run the script again
 to upgrade, like `install-server.sh`. Every step that is already done is
 skipped, and nothing is downloaded at boot.
 
@@ -796,9 +820,13 @@ docker compose --env-file config/server.env --env-file config/gpu-server.env \
     -f modules/vad-asr/docker-compose.yml \
     -f modules/emissor/docker-compose.yml \
     -f modules/whisper/docker-compose.yml \
-    -f modules/ollama/docker-compose.yml up -d --wait --pull always
+    -f modules/ollama/docker-compose.yml \
+    -f modules/vlm-object/docker-compose.yml up -d --wait --pull always
 docker compose ... exec ollama ollama pull qwen3-vl:8b-instruct-q4_K_M
 ```
+
+Until the model is pulled, `vlm-object` is up but every image fails with
+Ollama's `model ... not found`. Images uploaded meanwhile are not retried.
 
 The Docker host needs the NVIDIA Container Toolkit installed.
 `docker run --rm --gpus all nvidia/cuda:13.0.0-base-ubuntu22.04 nvidia-smi`
@@ -823,15 +851,15 @@ must work before `up`.
 
   Raise `OLLAMA_CONTEXT_LENGTH` or `OLLAMA_NUM_PARALLEL` for longer
   conversations or more tenants at once. VRAM grows with their product.
-- **Logs** of both services rotate at 10 MB × 3. Read them with
-  `scripts/server-compose.sh logs whisper ollama`.
+- **Logs** of whisper and ollama rotate at 10 MB × 3. Read them with
+  `scripts/server-compose.sh logs whisper ollama vlm-object`.
 
 ### Checking it on the server
 
 ```bash
 nvidia-smi                                                  # the driver
 docker run --rm --gpus all nvidia/cuda:13.0.0-base-ubuntu22.04 nvidia-smi
-scripts/server-compose.sh ps                                # whisper and ollama healthy
+scripts/server-compose.sh ps                                # whisper, ollama, vlm-object healthy
 scripts/server-compose.sh logs whisper | grep -i cuda       # "ggml_cuda_init: found 1 CUDA devices"
 curl -F file=@hello.wav http://127.0.0.1:8090/inference     # {"text": " Hello."}
 scripts/server-compose.sh exec ollama ollama ps             # PROCESSOR: 100% GPU
@@ -841,7 +869,11 @@ curl -u cltl:<password> https://<host>/ollama/api/chat \
 ```
 
 End to end, speak through a tenant: `scripts/server-compose.sh logs -f
-eliza-asr` shows each transcription as it arrives.
+eliza-asr` shows each transcription as it arrives. Upload a picture in a
+tenant's Image tab: `scripts/server-compose.sh logs -f vlm-object` shows
+`Detected scene '...' and objects: [...]`. `[cltl.monitoring] topic_object`
+already subscribes to `cltl.topic.object_recognition`; the EMISSOR recorder
+does not record that topic.
 
 ## Recording from the camera
 
