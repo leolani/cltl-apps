@@ -37,6 +37,8 @@ same three config files, and sets the same `extra_hosts`.
 | `chat-ui` | `chatui` | The web chat UI, with the Image, Monitoring and (opt-in) Display tabs beside the conversation and a status bar below it |
 | `monitoring` | `monitoring` | Optional per-scenario view, embedded as the chat UI's Monitoring tab |
 | `reverse-proxy` | `caddy` (+ a `rabbitmq` override) | Optional TLS and Basic Auth in front of a public server |
+| `whisper` | `whisper` | GPU server only: whisper.cpp's speech recognition server on the GPU, which `eliza-asr` sends its speech segments to. See [A GPU server](#a-gpu-server) |
+| `ollama` | `ollama` | GPU server only: a local LLM server (Ollama) with a vision model, for your own modules. See [A GPU server](#a-gpu-server) |
 
 ### `modules/backend` is one module, not two
 
@@ -171,6 +173,7 @@ external network.
 | [Standalone](#standalone-one-machine-no-tenants) | 1 | none | One machine, one user. Demos, development, a single-person agent |
 | [Server + tenant](#server--tenant) | 2 | 1 | The server's work (ASR, dialogue, storage) belongs on a different machine from the person talking |
 | [Multi-tenant](#a-second-tenant) | 1 + n | n | Several people, each with their own conversation, sharing one server |
+| [GPU server](#a-gpu-server) | 1 (+ tenants) | n | Any of the two above, with the server's speech recognition on an NVIDIA GPU and a local LLM beside it |
 
 A checkout's `config/` describes exactly one deployment, which is why the
 split layouts need more than one checkout: the server half and the tenant
@@ -691,6 +694,154 @@ the same for `containerd`), or Docker may start on an empty mountpoint at boot.
 `scripts/test/run.sh` runs the installer end to end in a throwaway systemd
 container, as its `ubuntu` user onto a Docker volume standing in for the
 attached one, with Pebble standing in for Let's Encrypt.
+
+## A GPU server
+
+A server (the role above) on a machine with an NVIDIA GPU, adding two
+modules:
+
+- **`modules/whisper`**: whisper.cpp's `whisper-server`, built with CUDA,
+  running Whisper large-v3-turbo. `modules/vad-asr` stays in the deployment:
+  VAD still runs there, and the ASR container now posts each speech segment
+  to `http://whisper:8080/inference` rather than running openai-whisper on
+  the CPU. That switch is `[cltl.asr] implementation: whisper_cpp`, with the
+  URL in `[cltl.asr.whisper_cpp]`.
+- **`modules/ollama`**: an Ollama server with a vision model,
+  `qwen3-vl:8b-instruct-q4_K_M`, which takes images as well as text. **No
+  module of the platform calls it yet**: the agent's dialogue is ELIZA, which
+  is rule-based. It is there for your own modules. On the server, a module
+  reaches it at `http://ollama:11434`; a tenant's module (`custom-module/`)
+  uses `https://<host>/ollama/` with the same Basic Auth credential as
+  `/storage`. Both the native API (`/api/chat`) and the OpenAI-compatible
+  one (`/v1/chat/completions`) are served.
+
+`templates/gpu-server/` selects it. Its `custom.config` is the server's
+`custom.config` plus those two endpoints, with the model names fixed to what
+the server runs. It *replaces* the server's file, because a checkout has one
+`custom.config`. Its `gpu-server.env` only *adds* to `server.env`: image
+tags, the Whisper model file, and loopback ports for an operator.
+`scripts/server-compose.sh` takes the existence of `config/gpu-server.env`
+to mean that this checkout is a GPU server, and adds both modules and that
+env file.
+
+### Prerequisites
+
+- An NVIDIA GPU of compute capability 7.5–9.0 (Turing to Hopper: T4, A10,
+  L4, L40S, A100, H100, …) on x86_64. The defaults use about 10 GB of VRAM
+  (Whisper about 2 GB; the vision model about 6 GB, plus its KV cache for
+  4 × 4096 tokens), so a 48 GB card has room for a much larger model.
+  Blackwell GPUs are not in the pinned whisper.cpp build; CUDA compiles its
+  kernels for them on first start, slowly, if at all.
+- **The NVIDIA driver, 580 or newer**: the whisper.cpp image is a CUDA 13
+  build. GPU cloud images usually ship one. Otherwise, before anything else:
+
+  ```bash
+  sudo ubuntu-drivers install --gpgpu && sudo reboot
+  nvidia-smi        # must list the GPU
+  ```
+
+- About 60 GB free on the data volume, for the images and both models.
+- **A `cltl-asr` image that knows `whisper_cpp`.** Older images exit at start
+  with `Unsupported implementation whisper_cpp`. The installer checks this
+  before it changes anything.
+
+Everything in [Installing a server on a cloud VM](#installing-a-server-on-a-cloud-vm)
+applies too: DNS name, inbound ports 80, 443 and 5671, the attached volume.
+
+### Install
+
+`scripts/install-gpu-server.sh` takes every option `install-server.sh` does,
+and passes them on to it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-gpu-server.sh \
+    | bash -s -- --dir ~/data/<volume>/cltl-apps \
+                 --hostname combot.example.org --email you@example.org
+```
+
+Before running `install-server.sh` it:
+
+1. Checks the driver.
+2. Installs the NVIDIA Container Toolkit (pinned, from NVIDIA's apt
+   repository). Docker's `--gpus` uses the toolkit's hook directly, so
+   `/etc/docker/daemon.json` gets no runtime entry.
+3. Downloads the Whisper model into `storage/whisper/` and checks its sha256.
+4. Puts the GPU template's `custom.config` in place.
+
+After `install-server.sh` has brought the server up, the script:
+
+1. Proves the GPU works with a `docker run --gpus all … nvidia-smi`.
+2. Only then puts `config/gpu-server.env` in place and restarts
+   `cltl-server.service` with both GPU modules.
+3. Pulls the Ollama model into `storage/ollama/`.
+4. Checks that whisper transcribes, that Ollama generates on the GPU, and
+   that `/ollama/` refuses requests without the credential.
+
+`--ollama-model <tag>` pulls another model and names it in
+`[cltl.llm.ollama]`; it is remembered for later runs. Run the script again
+to upgrade, like `install-server.sh`. Every step that is already done is
+skipped, and nothing is downloaded at boot.
+
+### By hand
+
+```bash
+cp templates/common/config/* templates/server/config/* templates/gpu-server/config/* config/
+mkdir -p storage/whisper
+curl -fL -o storage/whisper/ggml-large-v3-turbo.bin \
+    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+docker compose --env-file config/server.env --env-file config/gpu-server.env \
+    -f modules/event-bus/docker-compose.yml \
+    -f modules/backend/docker-compose.yml \
+    -f modules/eliza/docker-compose.yml \
+    -f modules/vad-asr/docker-compose.yml \
+    -f modules/emissor/docker-compose.yml \
+    -f modules/whisper/docker-compose.yml \
+    -f modules/ollama/docker-compose.yml up -d --wait --pull always
+docker compose ... exec ollama ollama pull qwen3-vl:8b-instruct-q4_K_M
+```
+
+The Docker host needs the NVIDIA Container Toolkit installed.
+`docker run --rm --gpus all nvidia/cuda:13.0.0-base-ubuntu22.04 nvidia-smi`
+must work before `up`.
+
+### Tuning and updates
+
+- **Images** are pinned in the two compose files: `ollama/ollama:0.40.16`,
+  and for whisper.cpp the `main-cuda-<commit>` build of v1.9.5. whisper.cpp
+  publishes no release tags, so a commit is the only stable name.
+  `WHISPER_TAG` and `OLLAMA_TAG` in `config/gpu-server.env` move them. Both
+  are independent of `VERSION`, which tags only the platform's own images.
+  To upgrade, change the tag (or the default in the compose file, in a
+  commit) and run the installer again.
+- **The Whisper model**: `CLTL_WHISPER_MODEL` in `config/gpu-server.env`
+  names the file in `storage/whisper/`. Change `[cltl.asr.whisper_cpp] model`
+  with it, which is only a label.
+- **Ollama** is tuned in `modules/ollama/docker-compose.yml`:
+  - models stay loaded for good (`OLLAMA_KEEP_ALIVE=-1`);
+  - 4 requests in parallel with a 4096-token context each;
+  - flash attention on, with a `q8_0` KV cache.
+
+  Raise `OLLAMA_CONTEXT_LENGTH` or `OLLAMA_NUM_PARALLEL` for longer
+  conversations or more tenants at once. VRAM grows with their product.
+- **Logs** of both services rotate at 10 MB × 3. Read them with
+  `scripts/server-compose.sh logs whisper ollama`.
+
+### Checking it on the server
+
+```bash
+nvidia-smi                                                  # the driver
+docker run --rm --gpus all nvidia/cuda:13.0.0-base-ubuntu22.04 nvidia-smi
+scripts/server-compose.sh ps                                # whisper and ollama healthy
+scripts/server-compose.sh logs whisper | grep -i cuda       # "ggml_cuda_init: found 1 CUDA devices"
+curl -F file=@hello.wav http://127.0.0.1:8090/inference     # {"text": " Hello."}
+scripts/server-compose.sh exec ollama ollama ps             # PROCESSOR: 100% GPU
+curl -u cltl:<password> https://<host>/ollama/api/chat \
+    -d '{"model": "qwen3-vl:8b-instruct-q4_K_M", "stream": false,
+         "messages": [{"role": "user", "content": "Hi"}]}'
+```
+
+End to end, speak through a tenant: `scripts/server-compose.sh logs -f
+eliza-asr` shows each transcription as it arrives.
 
 ## Recording from the camera
 

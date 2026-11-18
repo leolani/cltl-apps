@@ -27,8 +27,14 @@ files=(
     -f modules/emissor/docker-compose.yml
     -f modules/reverse-proxy/docker-compose.yml
 )
+env_files=(--env-file config/server.env)
+# A GPU server (templates/gpu-server, scripts/install-gpu-server.sh).
+if [[ -f config/gpu-server.env ]]; then
+    files+=(-f modules/whisper/docker-compose.yml -f modules/ollama/docker-compose.yml)
+    env_files+=(--env-file config/gpu-server.env)
+fi
 if [[ -f config/compose.override.yml ]]; then
     files+=(-f config/compose.override.yml)
 fi
 
-docker_cli compose --env-file config/server.env "${files[@]}" "$@"
+docker_cli compose "${env_files[@]}" "${files[@]}" "$@"

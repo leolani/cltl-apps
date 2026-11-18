@@ -15,6 +15,15 @@ cp templates/common/config/* templates/server/config/* config/       # the share
 cp templates/common/config/* templates/tenant/config/* config/       # one tenant's user-facing half
 ```
 
+A GPU server is the server role with `templates/gpu-server` copied over it.
+Its `custom.config` replaces the server's, and its `gpu-server.env` sits
+beside `server.env`. See
+[`../doc/DEPLOYMENT.md#a-gpu-server`](../doc/DEPLOYMENT.md#a-gpu-server):
+
+```bash
+cp templates/common/config/* templates/server/config/* templates/gpu-server/config/* config/
+```
+
 (run these from the repository root, not from inside `config/`)
 
 That leaves four files here:

@@ -36,12 +36,15 @@ cltl-apps/
 │   ├── context/         opens/closes the conversation scenario, BDI model
 │   ├── chat-ui/         the web chat UI
 │   ├── monitoring/      per-scenario view, embedded as a chat-ui tab
-│   └── reverse-proxy/   optional TLS + auth in front of a public server
+│   ├── reverse-proxy/   optional TLS + auth in front of a public server
+│   ├── whisper/         GPU server: whisper.cpp speech recognition on the GPU
+│   └── ollama/          GPU server: a local LLM (vision model) on the GPU
 ├── templates/        config to copy into a checkout's config/
 │   ├── common/         the platform baseline, shared by every role
 │   ├── standalone/     everything on one machine, no tenant
 │   ├── server/         the shared, untenanted half
 │   ├── tenant/         one tenant's user-facing half
+│   ├── gpu-server/     a server with GPU speech recognition and a local LLM
 │   └── module/         pointer at custom-module/, see below
 ├── custom-module/    template: attach your own code via the event bus
 ├── config/           THIS checkout's own config — generated, not tracked;
@@ -217,6 +220,28 @@ curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/inst
 
 See [doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#installing-a-server-on-a-cloud-vm).
 
+### A GPU server
+
+On a machine with an NVIDIA GPU (driver 580 or newer),
+[`scripts/install-gpu-server.sh`](scripts/install-gpu-server.sh) installs the
+same public server, using the `templates/gpu-server` template, with two
+extra modules:
+
+- **speech recognition on the GPU** (`modules/whisper`, whisper.cpp with
+  Whisper large-v3-turbo);
+- **a local LLM server** (`modules/ollama`, with the vision model
+  `qwen3-vl:8b-instruct-q4_K_M`), reachable at `https://<host>/ollama/` for
+  your own modules. Nothing in the stock agent calls it yet.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/leolani/cltl-apps/main/scripts/install-gpu-server.sh \
+    | bash -s -- --dir ~/data/<volume>/cltl-apps \
+                 --hostname combot.example.org --email you@example.org
+```
+
+Prerequisites, startup by hand, and tuning:
+[doc/DEPLOYMENT.md](doc/DEPLOYMENT.md#a-gpu-server).
+
 
 ## Ports
 
@@ -239,6 +264,8 @@ conversation a status bar shows what modules report they are doing. See
 | 8003 | Chat UI (`modules/chat-ui`) | `CLTL_CHATUI_PORT` |
 | 8005 | Monitoring view (`modules/monitoring`) | `CLTL_MONITORING_PORT` |
 | 8000 | Host microphone/camera server (`leoserv`, on the host, not in Docker) | fixed |
+| 8090 | whisper.cpp server, GPU server only (`modules/whisper`), loopback | `CLTL_WHISPER_PORT` |
+| 11434 | Ollama, GPU server only (`modules/ollama`), loopback; public at `/ollama/` on 443 | `CLTL_OLLAMA_PORT` |
 
 In the split layout a tenant's `backend` moves to 9001 (`CLTL_BACKEND_PORT`
 in `config/tenant.env`), because 8001 is already taken by the server

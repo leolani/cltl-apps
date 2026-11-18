@@ -65,6 +65,22 @@
 		reverse_proxy rabbitmq:15672
 	}
 
+	# ---------------------------------------------------------------------
+	# Ollama (modules/ollama), on a GPU server only; anywhere else this
+	# answers 502 after the credential check. Stripped, unlike the routes
+	# above: Ollama serves /api/... and /v1/... at its root, so
+	# https://<host>/ollama/api/chat reaches http://ollama:11434/api/chat.
+	# ---------------------------------------------------------------------
+	handle_path /ollama/* {
+		basic_auth {
+			import /etc/caddy/secrets/basic_auth.auth
+		}
+		# Streamed replies pass through token by token, not buffered.
+		reverse_proxy ollama:11434 {
+			flush_interval -1
+		}
+	}
+
 	# Anything else, including the bare root, is not part of this deployment.
 	handle {
 		respond "cltl-apps: nothing is served here." 404

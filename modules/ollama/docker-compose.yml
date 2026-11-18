@@ -1,0 +1,75 @@
+# A local LLM server on the GPU: Ollama. Part of a GPU server deployment
+# (templates/gpu-server).
+#
+# Nothing in the platform's own module set calls it yet — the agent's dialogue
+# is ELIZA, which is rule-based. It is here for your own modules: one on this
+# server reaches it as http://ollama:11434 on the Docker network, and a
+# tenant's module (custom-module/) through modules/reverse-proxy at
+# https://<host>/ollama/, behind the same Basic Auth credential as /storage.
+# Both the native API (/api/chat, /api/generate) and the OpenAI-compatible one
+# (/v1/chat/completions) are served. [cltl.llm.ollama] in
+# templates/gpu-server/config/custom.config names the URL and the model.
+#
+# The default model is a vision model (qwen3-vl:8b-instruct-q4_K_M), so images
+# can go in alongside text: `images: [<base64>]` on a message for /api/chat,
+# an `image_url` content part for /v1. Models are pulled into this checkout's
+# storage/ollama/, not at startup — scripts/install-gpu-server.sh does it, or:
+#
+#   scripts/server-compose.sh exec ollama ollama pull qwen3-vl:8b-instruct-q4_K_M
+#
+# Needs the NVIDIA driver and the NVIDIA Container Toolkit on the host (see
+# ../../doc/DEPLOYMENT.md#a-gpu-server). OLLAMA_TAG in config/gpu-server.env
+# moves the image off the version pinned below.
+
+name: ${CLTL_PROJECT:-cltl-platform}
+
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_TAG:-0.40.16}
+    restart: "no"
+    environment:
+      # Keep a loaded model in VRAM for good: no cold start on the first
+      # request after a quiet spell. The GPU is this server's own.
+      - OLLAMA_KEEP_ALIVE=-1
+      # Requests served at once per model. VRAM for the context grows with
+      # NUM_PARALLEL x CONTEXT_LENGTH.
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_CONTEXT_LENGTH=4096
+      - OLLAMA_MAX_LOADED_MODELS=2
+      # Ollama turns flash attention on by itself where the GPU supports it;
+      # stated so that the quantised KV cache below, which needs it, is never
+      # silently ignored. q8_0 halves the cache's VRAM at no noticeable cost.
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+    ports:
+      # Loopback only, for an operator on the host; see the header for the
+      # two ways other code reaches it.
+      - "${CLTL_OLLAMA_BIND:-127.0.0.1}:${CLTL_OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ../../storage/ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      # The image has no curl; the CLI asks the server it runs beside.
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: ${CLTL_PROJECT:-cltl-platform}
+    driver: bridge

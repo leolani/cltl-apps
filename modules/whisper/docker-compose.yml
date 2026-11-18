@@ -1,0 +1,66 @@
+# Speech recognition on the GPU: whisper.cpp's HTTP server (whisper-server),
+# built with CUDA. Part of a GPU server deployment (templates/gpu-server), where
+# modules/vad-asr stops transcribing in-process and sends each speech segment
+# here instead — [cltl.asr] implementation: whisper_cpp, with the URL in
+# [cltl.asr.whisper_cpp]. Nothing else talks to it.
+#
+# Needs the NVIDIA driver and the NVIDIA Container Toolkit on the host (see
+# ../../doc/DEPLOYMENT.md#a-gpu-server), and the model file in this checkout's
+# storage/whisper/ BEFORE it starts: whisper-server loads one file at startup
+# and downloads nothing. scripts/install-gpu-server.sh puts it there; by hand:
+#
+#   mkdir -p storage/whisper && curl -fL -o storage/whisper/ggml-large-v3-turbo.bin \
+#       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+#
+#   docker compose --env-file config/server.env --env-file config/gpu-server.env \
+#       -f ../event-bus/docker-compose.yml ... -f docker-compose.yml up -d --wait
+#
+# The image has no release tags, only a moving main-cuda and one
+# main-cuda-<commit> per build. The default below is the commit of whisper.cpp
+# v1.9.5; WHISPER_TAG in config/gpu-server.env moves it. It is a CUDA 13 build
+# (NVIDIA driver 580 or newer) for compute capability 7.5, 8.0, 8.6 and 9.0
+# GPUs, which covers Turing to Hopper, L4 and L40S included.
+
+name: ${CLTL_PROJECT:-cltl-platform}
+
+services:
+  whisper:
+    image: ghcr.io/ggml-org/whisper.cpp:${WHISPER_TAG:-main-cuda-d1be6fde11ac6e0407606b4e42fe72d34add8037}
+    restart: "no"
+    # The image's entrypoint is `bash -c`, so the whole command is one string.
+    # -fa: flash attention, faster and lighter on the GPU.
+    command:
+      - whisper-server --host 0.0.0.0 --port 8080 -fa -m /models/${CLTL_WHISPER_MODEL:-ggml-large-v3-turbo.bin}
+    ports:
+      # Loopback only: modules/vad-asr reaches it as http://whisper:8080 on the
+      # Docker network. This port is for an operator on the host, e.g.
+      #   curl -F file=@hello.wav http://127.0.0.1:8090/inference
+      - "${CLTL_WHISPER_BIND:-127.0.0.1}:${CLTL_WHISPER_PORT:-8090}:8080"
+    volumes:
+      - ../../storage/whisper:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      # 503 while the model is still loading, 200 once it can transcribe.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - cltl-platform
+
+networks:
+  cltl-platform:
+    name: ${CLTL_PROJECT:-cltl-platform}
+    driver: bridge
