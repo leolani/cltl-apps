@@ -276,13 +276,18 @@ transcript=$(compose exec -T whisper bash -c \
     'ffmpeg -loglevel error -y -f lavfi -i anullsrc=r=16000:cl=mono -t 1 /tmp/check.wav &&
      curl -fsS -F file=@/tmp/check.wav -F response_format=json http://localhost:8080/inference' < /dev/null || true)
 [[ $transcript == *'"text"'* ]] || fail "whisper did not transcribe a test file: ${transcript:-no answer}"
-compose logs whisper 2>&1 | grep -qiE 'CUDA|cuBLAS' || fail "whisper's log shows no CUDA device; is it on the CPU?"
+# Each output is captured before it is searched, never piped into `grep -q`:
+# grep exits at its first match, the writer then dies of SIGPIPE, and
+# pipefail turns that into a failed check although the text was there.
+whisper_log=$(compose logs whisper 2>&1 || true)
+grep -qiE 'CUDA|cuBLAS' <<< "$whisper_log" || fail "whisper's log shows no CUDA device; is it on the CPU?"
 
 compose exec -T ollama ollama run "$ollama_model" "Answer with one word: OK" < /dev/null > /dev/null \
     || fail "ollama could not generate with $ollama_model"
-compose exec -T ollama ollama ps < /dev/null | grep -q 'GPU' || fail "ollama ps shows $ollama_model not on the GPU"
-compose exec -T ollama ollama show "$ollama_model" < /dev/null | grep -qw vision \
-    || warn "$ollama_model is not a vision model; images will be refused"
+ollama_ps=$(compose exec -T ollama ollama ps < /dev/null || true)
+grep -q 'GPU' <<< "$ollama_ps" || fail "ollama ps shows $ollama_model not on the GPU"
+ollama_show=$(compose exec -T ollama ollama show "$ollama_model" < /dev/null || true)
+grep -qw vision <<< "$ollama_show" || warn "$ollama_model is not a vision model; images will be refused"
 [[ $(compose ps --format '{{.Health}}' vlm-object) == healthy ]] \
     || fail "vlm-object is not healthy (scripts/server-compose.sh logs vlm-object)"
 
