@@ -1228,3 +1228,65 @@ value with nothing in the environment to expand it. The platform warns and
 carries on with the literal text, so this is a warning you want to act on:
 the usual cause is a value left as `$CLTL_TENANT` where a literal tenant id
 belongs.
+
+**CERTIFICATE_VERIFY_FAILED ... unable to get local issuer certificate
+from `amqp/transport.py`** — this happens with a module run directly on the
+host (`custom-module/` from a venv, a notebook, `python src/main.py`) against
+an `amqps://` server, while the same deployment's containers connect fine.
+The certificate is valid. The Python running the module has no CA store, or
+a different one: with `ssl_ca_certs` empty, `KombuEventBus` verifies against
+Python's default store, which is the container's Debian `ca-certificates`
+inside Docker and whatever that Python's OpenSSL was built with on the host.
+To see which file that is (a `cafile` path that does not exist means an
+empty store):
+
+```bash
+python -c "import ssl; print(ssl.get_default_verify_paths())"
+```
+
+Fix it per interpreter:
+
+- **macOS, python.org installer** (`/Library/Frameworks/Python.framework/...`
+  in the traceback). That Python ships its own OpenSSL, ignores the
+  Keychain, and has no CA bundle until its post-install step runs. Run it
+  once per Python version; every venv made from that Python is then fixed:
+
+  ```bash
+  open "/Applications/Python 3.11/Install Certificates.command"
+  ```
+
+  Homebrew and pyenv Pythons use Homebrew's `ca-certificates` and normally
+  work; if one does not, `brew reinstall ca-certificates openssl@3`.
+- **Anaconda / Miniconda.** Conda's Python uses conda's own OpenSSL and the
+  bundle from its `ca-certificates` package, not the OS store. An old or
+  broken environment fails here; update it inside the activated
+  environment, then open a new shell:
+
+  ```bash
+  conda install ca-certificates certifi openssl
+  ```
+
+  Check that no `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` left over from
+  another setup points somewhere stale (`env | grep -i cert`).
+- **Windows.** Python loads the Windows certificate store, but only the
+  roots already in it. Windows normally adds a root such as Let's Encrypt's
+  ISRG Root X1 the first time a browser needs it. Python cannot trigger
+  that, so on a fresh, offline or centrally managed machine (root updates
+  switched off by policy) the root may be missing. Opening
+  `https://<hostname>/` in Edge or Chrome once usually installs it; otherwise
+  ask whoever manages the machine to deploy it.
+
+The workaround for any of these is to point OpenSSL at `certifi`'s bundle,
+which the venv already contains. Set it in the shell that starts the module,
+or add it to the venv's `activate` script:
+
+```bash
+export SSL_CERT_FILE="$(python -m certifi)"          # macOS / Linux
+$env:SSL_CERT_FILE = (python -m certifi)              # Windows PowerShell
+```
+
+Do not put a host path in `[cltl.event.kombu] ssl_ca_certs` for this. Every
+module in the checkout reads that key, including the containers, where a
+macOS or Windows path does not exist. It is meant only for a broker whose
+certificate is not from a public CA (see
+[A tenant of a public server](#a-tenant-of-a-public-server)).
