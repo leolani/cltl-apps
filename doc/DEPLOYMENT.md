@@ -701,6 +701,8 @@ the same for `containerd`), or Docker may start on an empty mountpoint at boot.
 `scripts/test/run.sh` runs the installer end to end in a throwaway systemd
 container, as its `ubuntu` user onto a Docker volume standing in for the
 attached one, with Pebble standing in for Let's Encrypt.
+`scripts/test/tenant/tenant-test.sh` tests an installed server from
+outside, as a tenant; see [Checking it from outside](#checking-it-from-outside).
 
 ## A GPU server
 
@@ -880,6 +882,34 @@ tenant's Image tab: `scripts/server-compose.sh logs -f vlm-object` shows
 `Detected scene '...' and objects: [...]`. `[cltl.monitoring] topic_object`
 already subscribes to `cltl.topic.object_recognition`; the EMISSOR recorder
 does not record that topic.
+
+### Checking it from outside
+
+Two scripts test a server from another machine, with only what a tenant or
+an OpenAI client has. Copy the server's `config/credentials` and
+`config/tenants.urls` over first.
+
+```bash
+scripts/test/check_ollama.py https://<host> <OLLAMA_TOKEN>    # bearer token, models, text, vision
+scripts/test/tenant/tenant-test.sh --credentials credentials --tenants tenants.urls
+```
+
+`tenant-test.sh` needs only Docker. It brings up a throwaway tenant here
+(backend, context, chat-ui, and a fake microphone in place of `leoserv`),
+runs three checks, and takes the tenant down again:
+
+- **chat**: two lines through the chat UI, each answered on
+  `cltl.topic.text_out` or `cltl.topic.eliza_out`.
+- **objects**: an uploaded image comes back on
+  `cltl.topic.object_recognition` with labelled boxes.
+- **asr**: the fake microphone plays a WAV, and a transcript arrives on
+  `cltl.topic.text_in`.
+
+`--only chat,asr` skips object recognition on a server without the GPU
+modules. `--tenant` picks the tenant when `tenants.urls` lists several, and
+`--keep` leaves the tenant up for a look in its chat UI. Use a tenant kept
+for testing: the run leaves its conversation, recordings and image in the
+server's storage. The script's header lists every option.
 
 ## Recording from the camera
 
