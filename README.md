@@ -232,7 +232,8 @@ extra modules:
   Whisper large-v3-turbo);
 - **a local LLM server** (`modules/ollama`, with the vision model
   `qwen3-vl:8b-instruct-q4_K_M`), reachable at `https://<host>/ollama/` for
-  your own modules;
+  your own modules, with a bearer token that OpenAI clients take as their
+  `api_key`;
 - **object recognition** (`modules/vlm-object`), which sends every uploaded
   image to that model and publishes the scene and the objects it sees on
   `cltl.topic.object_recognition`. The ELIZA dialogue does not use them.

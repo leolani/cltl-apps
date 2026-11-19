@@ -175,6 +175,9 @@ for port in 8001 8002 15672; do
 done
 expect "https://$HOST/storage/ needs Basic Auth" sh -c \
     "test \"\$(curl -s -o /dev/null -w '%{http_code}' --cacert $WORK/ca.pem --resolve $HOST:443:$VM_IP https://$HOST/storage/)\" = 401"
+# Not a GPU server, so no CLTL_OLLAMA_TOKEN: an empty bearer token must not match it.
+expect "https://$HOST/ollama/ refuses an empty bearer token without a GPU server" sh -c \
+    "test \"\$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ' --cacert $WORK/ca.pem --resolve $HOST:443:$VM_IP https://$HOST/ollama/v1/models)\" = 401"
 
 admin_pw=$(vm sh -c "grep ^RABBITMQ_ADMIN_PASSWORD= $APP/config/credentials | cut -d= -f2")
 expect "RabbitMQ management API works through caddy with the admin's own login" sh -c \

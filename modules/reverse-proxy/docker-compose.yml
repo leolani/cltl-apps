@@ -75,6 +75,10 @@ services:
       # https://acme-staging-v02.api.letsencrypt.org/directory while
       # experimenting, to stay clear of the production rate limits.
       CLTL_ACME_CA: ${CLTL_ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      # The bearer token /ollama/ requires, set in config/gpu-server.env by
+      # scripts/install-gpu-server.sh. Empty on any other server, where the
+      # Caddyfile then refuses every /ollama/ request.
+      CLTL_OLLAMA_TOKEN: ${CLTL_OLLAMA_TOKEN:-}
     networks:
       - cltl-platform
 

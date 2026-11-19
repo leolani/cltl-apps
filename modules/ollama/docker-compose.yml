@@ -5,7 +5,8 @@
 # is ELIZA, which is rule-based. It is here for your own modules: one on this
 # server reaches it as http://ollama:11434 on the Docker network, and a
 # tenant's module (custom-module/) through modules/reverse-proxy at
-# https://<host>/ollama/, behind the same Basic Auth credential as /storage.
+# https://<host>/ollama/, with a bearer token (CLTL_OLLAMA_TOKEN in
+# config/gpu-server.env) that an OpenAI client sends as its api_key.
 # Both the native API (/api/chat, /api/generate) and the OpenAI-compatible one
 # (/v1/chat/completions) are served. [cltl.llm.ollama] in
 # templates/gpu-server/config/custom.config names the URL and the model.

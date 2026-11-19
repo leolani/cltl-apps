@@ -35,7 +35,7 @@
 #      rest;
 #   5. the Ollama model, pulled into storage/ollama/;
 #   6. checks: a transcription, a generation on the GPU, and /ollama/ on 443
-#      refusing requests without the Basic Auth credential.
+#      refusing requests without its bearer token (in config/credentials).
 #
 # Options of its own (everything else goes to install-server.sh, see its --help):
 #   --ollama-model TAG  the model to pull and name in config/custom.config, for
@@ -251,6 +251,13 @@ if [[ ! -f config/gpu-server.env ]]; then
     cp templates/gpu-server/config/gpu-server.env config/
     chmod 600 config/gpu-server.env
 fi
+# The bearer token modules/reverse-proxy requires on /ollama/, so that an
+# OpenAI client's api_key is the credential. Generated once, kept like the
+# other secrets in config/credentials, and handed to caddy through this file.
+ollama_token=$(kv_get "$CLTL_CREDENTIALS_FILE" OLLAMA_TOKEN)
+[[ -n $ollama_token ]] || ollama_token=$(generate_secret)
+kv_set "$CLTL_CREDENTIALS_FILE" OLLAMA_TOKEN "$ollama_token"
+kv_set config/gpu-server.env CLTL_OLLAMA_TOKEN "$ollama_token"
 log "Starting the GPU modules"
 compose pull -q whisper ollama vlm-object
 as_root systemctl restart cltl-server.service
@@ -280,16 +287,16 @@ compose exec -T ollama ollama show "$ollama_model" < /dev/null | grep -qw vision
     || fail "vlm-object is not healthy (scripts/server-compose.sh logs vlm-object)"
 
 hostname=$(kv_get "$CLTL_ENV_FILE" CLTL_HOSTNAME)
-auth_user=$(kv_get "$CLTL_CREDENTIALS_FILE" BASIC_AUTH_USER)
-auth_password=$(kv_get "$CLTL_CREDENTIALS_FILE" BASIC_AUTH_PASSWORD)
 curl_ca=()
 [[ -z $test_ca_file ]] || curl_ca=(--cacert "$test_ca_file")
-status=$(curl -s -o /dev/null -w '%{http_code}' "${curl_ca[@]}" \
-         --resolve "$hostname:443:127.0.0.1" "https://$hostname/ollama/api/tags" || true)
-[[ $status == 401 ]] || fail "https://$hostname/ollama/ without credentials: HTTP $status, expected 401"
-status=$(curl -s -o /dev/null -w '%{http_code}' "${curl_ca[@]}" -u "$auth_user:$auth_password" \
-         --resolve "$hostname:443:127.0.0.1" "https://$hostname/ollama/api/tags" || true)
-[[ $status == 200 ]] || fail "https://$hostname/ollama/api/tags with credentials: HTTP $status, expected 200"
+ollama_status() {
+    curl -s -o /dev/null -w '%{http_code}' "${curl_ca[@]}" "$@" \
+         --resolve "$hostname:443:127.0.0.1" "https://$hostname/ollama/v1/models" || true
+}
+status=$(ollama_status)
+[[ $status == 401 ]] || fail "https://$hostname/ollama/ without a token: HTTP $status, expected 401"
+status=$(ollama_status -H "Authorization: Bearer $ollama_token")
+[[ $status == 200 ]] || fail "https://$hostname/ollama/v1/models with the token: HTTP $status, expected 200"
 
 # --- 9. Summary -----------------------------------------------------------------------------
 
@@ -299,8 +306,9 @@ GPU modules on https://$hostname (in addition to the server above)
 
   Speech recognition  whisper.cpp, $WHISPER_MODEL, internal only (http://whisper:8080)
   LLM                 https://$hostname/ollama/   model $ollama_model
-                      Basic Auth $auth_user / $auth_password
-                      e.g. curl -u $auth_user:<password> https://$hostname/ollama/api/chat \\
+                      bearer token $ollama_token
+                      OpenAI clients: base_url https://$hostname/ollama/v1, api_key the token
+                      e.g. curl -H "Authorization: Bearer <token>" https://$hostname/ollama/api/chat \\
                                -d '{"model": "$ollama_model", "messages": [{"role": "user", "content": "Hi"}]}'
   Object recognition  modules/vlm-object with $ollama_model: images on cltl.topic.image,
                       results on cltl.topic.object_recognition

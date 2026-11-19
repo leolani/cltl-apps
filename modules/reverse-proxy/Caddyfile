@@ -4,7 +4,8 @@
 # at the top of ./docker-compose.yml.
 #
 # One shared Basic Auth credential guards the storage and EMISSOR routes (see
-# ./docker-compose.yml for how to generate it). This matches the platform's
+# ./docker-compose.yml for how to generate it; /ollama/ takes a bearer token
+# instead, see its route below). This matches the platform's
 # existing tenancy model: separation between tenants is cooperative (a
 # routing key), not enforced — so one deployment-wide credential, kept off
 # the public internet otherwise, is proportionate. An operator who needs
@@ -66,18 +67,27 @@
 	}
 
 	# ---------------------------------------------------------------------
-	# Ollama (modules/ollama), on a GPU server only; anywhere else this
-	# answers 502 after the credential check. Stripped, unlike the routes
-	# above: Ollama serves /api/... and /v1/... at its root, so
+	# Ollama (modules/ollama), on a GPU server only. Stripped, unlike the
+	# routes above: Ollama serves /api/... and /v1/... at its root, so
 	# https://<host>/ollama/api/chat reaches http://ollama:11434/api/chat.
+	#
+	# Guarded by a bearer token instead of the Basic Auth credential, so
+	# that an OpenAI client's own api_key setting is the credential:
+	# `Authorization: Bearer $CLTL_OLLAMA_TOKEN`, from config/gpu-server.env.
+	# Without a token set (any server that is not a GPU server) the
+	# route refuses everything, even an empty `Bearer `.
 	# ---------------------------------------------------------------------
 	handle_path /ollama/* {
-		basic_auth {
-			import /etc/caddy/secrets/basic_auth.auth
+		@ollama_token expression `"{$CLTL_OLLAMA_TOKEN}" != "" && {http.request.header.Authorization} == "Bearer {$CLTL_OLLAMA_TOKEN}"`
+		handle @ollama_token {
+			# Streamed replies pass through token by token, not buffered.
+			reverse_proxy ollama:11434 {
+				flush_interval -1
+			}
 		}
-		# Streamed replies pass through token by token, not buffered.
-		reverse_proxy ollama:11434 {
-			flush_interval -1
+		handle {
+			header WWW-Authenticate "Bearer"
+			respond 401
 		}
 	}
 

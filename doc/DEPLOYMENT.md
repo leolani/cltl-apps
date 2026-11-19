@@ -718,9 +718,15 @@ modules:
   platform's modules only `vlm-object` below calls it; the agent's dialogue is
   ELIZA, which is rule-based. It is there for your own modules too. On the server, a module
   reaches it at `http://ollama:11434`; a tenant's module (`custom-module/`)
-  uses `https://<host>/ollama/` with the same Basic Auth credential as
-  `/storage`. Both the native API (`/api/chat`) and the OpenAI-compatible
-  one (`/v1/chat/completions`) are served.
+  uses `https://<host>/ollama/` with a bearer token,
+  `Authorization: Bearer <token>`, rather than the Basic Auth credential of
+  `/storage`. So an OpenAI client needs nothing but `base_url
+  https://<host>/ollama/v1` and the token as its `api_key`. The installer
+  generates the token, keeps it as `OLLAMA_TOKEN` in `config/credentials`,
+  and passes it to caddy as `CLTL_OLLAMA_TOKEN` in `config/gpu-server.env`;
+  without one, `/ollama/` refuses every request. Both the native API
+  (`/api/chat`) and the OpenAI-compatible one (`/v1/chat/completions`) are
+  served.
 - **`modules/vlm-object`**: object recognition
   ([cltl-vlm-object](https://github.com/leolani/cltl-custom-vlm-object-recognition)).
   For every image a tenant uploads in the chat UI's Image tab, it fetches the
@@ -797,7 +803,7 @@ After `install-server.sh` has brought the server up, the script:
 3. Pulls the Ollama model into `storage/ollama/`.
 4. Checks that whisper transcribes, that Ollama generates on the GPU, that
    `vlm-object` is healthy, and that `/ollama/` refuses requests without the
-   credential.
+   bearer token and accepts them with it.
 
 `--ollama-model <tag>` pulls another model and names it in both
 `[cltl.llm.ollama]` and `[cltl.vlm_object_recognition]`; it is remembered
@@ -863,7 +869,7 @@ scripts/server-compose.sh ps                                # whisper, ollama, v
 scripts/server-compose.sh logs whisper | grep -i cuda       # "ggml_cuda_init: found 1 CUDA devices"
 curl -F file=@hello.wav http://127.0.0.1:8090/inference     # {"text": " Hello."}
 scripts/server-compose.sh exec ollama ollama ps             # PROCESSOR: 100% GPU
-curl -u cltl:<password> https://<host>/ollama/api/chat \
+curl -H "Authorization: Bearer <token>" https://<host>/ollama/api/chat \
     -d '{"model": "qwen3-vl:8b-instruct-q4_K_M", "stream": false,
          "messages": [{"role": "user", "content": "Hi"}]}'
 ```
